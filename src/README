@@ -1,4 +1,4 @@
 #!/bin/tcsh
 
 
-python bin2csv.py CTWA.ROM > CTWA.CSV
+python bin2csv.py CWTA.ROM > CWTA.CSV
