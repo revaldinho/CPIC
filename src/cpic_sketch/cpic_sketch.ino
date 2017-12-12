@@ -1,5 +1,9 @@
 
 /*
+ * CPIC - An Amstrad CPC ROM Board in a ChipKit MAX32 microcontroller board
+ * 
+ * (C) 2017 Revaldinho
+ * 
  * PIC32 has 128KBytes RAM available for program and data, plus a further
  * 512KBytes Flash memory for static data.  
  *
@@ -52,20 +56,18 @@
 
 // Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
-#define ROMSEL          0x0100
-#define ROMEN_B         0x0200
-#define ROMDIS          0x0400
-#define IORQ_B          0x0800
-#define WR_B            0x1000
-#define WAIT_B          0x2000
+#define ROMEN_B         0x0100
+#define ROMDIS          0x0200
+#define IORQ_B          0x0400
+#define WR_B            0x0800
+#define WAIT_B          0x1000
+#define ADR13           0x2000   // Capture A13 in ctrl/data word as well
 
 // Define negative TRISTATE masks: 0 = output, 1 = input
 #define TRI_DATA        ~DATA
 #define TRI_ROMDIS      ~ROMDIS
 #define TRI_WAIT_B      ~WAIT_B
-
-// Only A13 special in address word
-#define A13             0x1 << 13
+#define TRI_ADR13       ~ADR13
 
 // Port Assignments
 #define CTRLDATA_MODE   TRISB          // use PORT B for ctrl + data bits
@@ -78,8 +80,8 @@
 // Constants and macros
 #define MAXROMS         1
 #define ROMSIZE         16384
-#define ROMACCESS       ~(ctrldata & ROMEN_B)
-#define ROMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&A13))
+#define ROMACCESS        ~(ctrldata & ROMEN_B)
+#define ROMSEL           ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (ctrldata&ADR13))
 
 // Global variables
 const char flashdata[MAXROMS][ROMSIZE] = { 
@@ -96,37 +98,36 @@ boolean validrom = false;
 boolean newaccess = 1 ;
 
 void setup() {
-  
   CTRLDATA_MODE = 0xFFFF ; // Tristate all ctrl/data outputs
   ADDR_MODE     = 0xFFFF ; // Tristate all address outputs
   CTRLDATA_OUT  = 0x0000 ; // Preset WAIT_B to zero before first assertion
   memcpy(romdata, flashdata,  MAXROMS*ROMSIZE) ; // Copy flash data to RAM on startup
-  
 }
 
 void loop() {
   int address;
   int ctrldata;
-  
-  address   = ADDR_IN & 0x3FFF ;      
-  ctrldata  = CTRLDATA_IN ;
+
+  // Read all control and data bits + A13
+  ctrldata  = CTRLDATA_IN ; 
 
   if ( ROMSEL ) {
     romnum = (ctrldata & 0x07) - 1;                       
-    validrom = ((romnum>=0) && (romnum <MAXROMS)) ? true : false; 
-    newaccess = true;    
+    validrom = (romnum>=0) && (romnum <MAXROMS); 
   } else if ( ROMACCESS ) {
+    
+    address   = ADDR_IN & 0x3FFF ;  
+        
     if ( newaccess && validrom ) {
 #ifdef USEWAITSTATE
-      CTRLDATA_MODE = (TRI_WAIT_B & TRI_ROMDIS & TRI_DATA) ;               // Enable output drivers, asserting WAIT_B
+      CTRLDATA_MODE = (TRI_WAIT_B & TRI_ROMDIS & TRI_DATA); // Enable output drivers, asserting WAIT_B
 #endif
-      CTRLDATA_OUT  = (                 ROMDIS | romdata[romnum][address]);// Write new data 
-      CTRLDATA_MODE = (             TRI_ROMDIS & TRI_DATA) ;               // Disable WAIT_B driver (deassert WAIT_B) only, leave others enabled
+      CTRLDATA_OUT  = (ROMDIS | romdata[romnum][address]);  // Write new data 
+      CTRLDATA_MODE = (TRI_ROMDIS & TRI_DATA) ;             // Disable WAIT_B driver (deassert WAIT_B) only, leave others enabled
       newaccess = false;    
     } // else DATABUS and ROMDIS state held here from previous action
   } else {
     CTRLDATA_MODE = 0xFFFF; // Not a ROM access so disable all drivers
     newaccess = true;    
   }
-  
 }
