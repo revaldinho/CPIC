@@ -76,18 +76,18 @@
 #define ADDR_OUT        LATC
 
 // Constants and macros
-#define MAXROMS         4
-#define ROMSIZE         1
+#define MAXROMS         1
+#define ROMSIZE         16384
 #define ROMACCESS       ~(ctrldata & ROMEN_B)
 #define ROMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&A13))
 
 // Global variables
-const char flashdata[MAXROMS][ROMSIZE] = { 1,2,3,4}; 
-//#include "ROM0.csv"
+const char flashdata[MAXROMS][ROMSIZE] = { 
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CTWA.CSV"
 //#include "ROM1.csv"
 //#include "ROM2.csv"
 //#include "ROM3.csv"
-//}
+};
 
 char romdata[MAXROMS][ROMSIZE] ;
 
