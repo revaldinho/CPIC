@@ -8,9 +8,14 @@
  * 512KBytes Flash memory for static data.  
  *
  * All ROM data is stored in flash memory to be persistent, but copied over into 
- * RAM on booting the board to get faster access. This will take a while so may 
+ * RAM on booting the board to get faster access: flash memory has a 30MHz read rate
+ * so reading directly would cause 3 wait states per access whereas the RAM runs at
+ * the full 80MHz core speed. Copying the ROM contents will take a while so may 
  * need to reboot the CPC after the ROM board: if sharing the CPC PSU then need
  * to provide a CPC reset button on the shield.
+ *
+ * PIC32 has a 256byte instruction cache to minimise wait states on executing from
+ * flash. Ideally loop() should fit in this cache...
  *
  * NB ROMs are numbered 0-MAXROMS-1 here, but map to CPC numbers 1-MAXROMS because
  * slot 0 is for the firmware and unlikely to be replaced
