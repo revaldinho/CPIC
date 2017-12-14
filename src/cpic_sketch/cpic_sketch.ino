@@ -59,20 +59,26 @@
 // Define only if not fast enough to serve ROM bytes in time available
 #define USEWAITSTATE    1
 
-// Define positive bit masks for ctrl + data word
+
+// ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
 #define ROMEN_B         0x0100
 #define ROMDIS          0x0200
 #define IORQ_B          0x0400
-#define WR_B            0x0800
-#define WAIT_B          0x1000
-#define ADR13           0x2000   // Capture A13 in ctrl/data word as well
+#define MREQ_B          0x0800
+#define WR_B            0x1000
+#define WAIT_B          0x2000
+#define RAMRD_B         0x3000
+#define RAMDIS          0x4000
+
+#define ADR13           1 << 13
+#define ADR15           1 << 15
 
 // Define negative TRISTATE masks: 0 = output, 1 = input
 #define TRI_DATA        ~DATA
 #define TRI_ROMDIS      ~ROMDIS
 #define TRI_WAIT_B      ~WAIT_B
-#define TRI_ADR13       ~ADR13
+#define TRI_RAMDIS      ~RAMDIS
 
 // Port Assignments
 #define CTRLDATA_MODE   TRISB          // use PORT B for ctrl + data bits
@@ -82,11 +88,15 @@
 #define ADDR_IN         PORTC
 #define ADDR_OUT        LATC
 
-// Constants and macros
+// ---- Constants and macros
 #define MAXROMS         1
 #define ROMSIZE         16384
-#define ROMACCESS        ~(ctrldata & ROMEN_B)
-#define ROMSEL           ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (ctrldata&ADR13))
+#define RAMBLKSIZE      16384
+#define ROMACCESS       ~(ctrldata&ROMEN_B)
+#define RAMRDACCESS     ~(ctrldata&RAMRD_B)
+#define RAMWRACCESS     ~(ctrldata&MREQ_B || (ctrldata&WR_B))
+#define ROMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13)) 
+#define RAMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR15))
 
 // Global variables
 const char flashdata[MAXROMS][ROMSIZE] = { 
@@ -97,10 +107,24 @@ const char flashdata[MAXROMS][ROMSIZE] = {
 };
 
 char romdata[MAXROMS][ROMSIZE] ;
+                                           //  48K for ROM space
+char ramdata[4][RAMBLKSIZE] ;              //  64K for D'ktronics RAM exp
+                                           //  16K for this program to run in
+                                           // ---- 
+                                           // 128K total PIC32 RAM capacity
+                                           // ----
+
+int ramblocklut [4][8] = {     // mapping for D'ktronics expansion RAM
+  -1, 3, 3, 3, -1, -1, -1, -1, //   -1 indicates use original CPC RAM bank
+  -1,-1, 2,-1, -1, -1, -1, -1, // 0..3 picks a 16K block from this expansion
+  -1,-1, 1,-1,  0,  1,  2,  3,
+  -1,-1, 0,-1, -1, -1, -1, -1,
+};
 
 int romnum = 0;
+int ramblknum = 0;
 boolean validrom = false;
-boolean newaccess = 1 ;
+boolean newaccess = true ;
 
 void setup() {
   CTRLDATA_MODE = 0xFFFF ; // Tristate all ctrl/data outputs
@@ -112,17 +136,18 @@ void setup() {
 void loop() {
   int address;
   int ctrldata;
-
-  // Read all control and data bits + A13
-  ctrldata  = CTRLDATA_IN ; 
-
+  int block;
+    
+  ctrldata = CTRLDATA_IN ;                                  
+  address  = ADDR_IN & 0x3FFF ;                           // Get valid lower 14b of address         
+  block    = ramblocklut[(address>>14)&0x03][ramblknum];
+  
   if ( ROMSEL ) {
     romnum = (ctrldata & 0x07) - 1;                       
     validrom = (romnum>=0) && (romnum <MAXROMS); 
+  } else if ( RAMSEL ) { 
+    ramblknum = (ctrldata & 0x07);                       
   } else if ( ROMACCESS ) {
-    
-    address   = ADDR_IN & 0x3FFF ;  
-        
     if ( newaccess && validrom ) {
 #ifdef USEWAITSTATE
       CTRLDATA_MODE = (TRI_WAIT_B & TRI_ROMDIS & TRI_DATA); // Enable output drivers, asserting WAIT_B
@@ -131,8 +156,22 @@ void loop() {
       CTRLDATA_MODE = (TRI_ROMDIS & TRI_DATA) ;             // Disable WAIT_B driver (deassert WAIT_B) only, leave others enabled
       newaccess = false;    
     } // else DATABUS and ROMDIS state held here from previous action
+  } else if ( RAMRDACCESS ) {
+    if ( newaccess && (block >=0 )) {         
+      CTRLDATA_OUT  = ( RAMDIS | ramdata[block][address]); // Write new data to databus and set RAMDIS high
+      CTRLDATA_MODE = ( TRI_RAMDIS & TRI_DATA) ;           // Enable RAMDIS and data drivers
+      newaccess = false;    
+    }
+  } else if ( RAMWRACCESS ) {
+    if (block>=0) {
+      ramdata[block][address] = (ctrldata & DATA);         // Write to internal RAM
+    }
   } else {
     CTRLDATA_MODE = 0xFFFF; // Not a ROM access so disable all drivers
     newaccess = true;    
   }
+
+#ifdef TESTRIG
+  // toggle GPIO here to measure loop time
+#endif  
 }
