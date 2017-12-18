@@ -58,7 +58,8 @@
 
 // Define only if not fast enough to serve ROM bytes in time available
 #define USEWAITSTATE    1
-
+// Define only if measuring response times via GPIOs (slows down system)
+#define TESTRIG         1
 
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
@@ -88,6 +89,14 @@
 #define ADDR_IN         PORTC
 #define ADDR_OUT        LATC
 
+// ---- Define some Test rig pins on Port G
+
+#define TEST5           84
+#define TEST4           83
+#define TEST3           82
+#define TEST2           79
+#define TEST1           78
+
 // ---- Constants and macros
 #define MAXROMS         1
 #define ROMSIZE         16384
@@ -97,6 +106,8 @@
 #define RAMWRACCESS     ~(ctrldata&MREQ_B || (ctrldata&WR_B))
 #define ROMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13)) 
 #define RAMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR15))
+
+
 
 // Global variables
 const char flashdata[MAXROMS][ROMSIZE] = { 
@@ -114,9 +125,9 @@ char ramdata[4][RAMBLKSIZE] ;              //  64K for D'ktronics RAM exp
                                            // 128K total PIC32 RAM capacity
                                            // ----
 
-int ramblocklut [4][8] = {     // mapping for D'ktronics expansion RAM
-  -1, 3, 3, 3, -1, -1, -1, -1, //   -1 indicates use original CPC RAM bank
-  -1,-1, 2,-1, -1, -1, -1, -1, // 0..3 picks a 16K block from this expansion
+int ramblocklut [4][8] = {                 // mapping for D'ktronics expansion RAM
+  -1, 3, 3, 3, -1, -1, -1, -1,             //   -1 indicates use original CPC RAM bank
+  -1,-1, 2,-1, -1, -1, -1, -1,             // 0..3 picks a 16K block from this expansion
   -1,-1, 1,-1,  0,  1,  2,  3,
   -1,-1, 0,-1, -1, -1, -1, -1,
 };
@@ -131,6 +142,21 @@ void setup() {
   ADDR_MODE     = 0xFFFF ; // Tristate all address outputs
   CTRLDATA_OUT  = 0x0000 ; // Preset WAIT_B to zero before first assertion
   memcpy(romdata, flashdata,  MAXROMS*ROMSIZE) ; // Copy flash data to RAM on startup
+
+#ifdef TESTRIG
+  pinMode(TEST1, OUTPUT);
+  pinMode(TEST2, OUTPUT);
+  pinMode(TEST3, OUTPUT);
+  pinMode(TEST4, OUTPUT);
+  pinMode(TEST5, OUTPUT);
+
+  digitalWrite(TEST1, LOW);
+  digitalWrite(TEST2, LOW);
+  digitalWrite(TEST3, LOW);
+  digitalWrite(TEST4, LOW);
+  digitalWrite(TEST5, LOW);
+#endif
+  
 }
 
 void loop() {
@@ -145,8 +171,14 @@ void loop() {
   if ( ROMSEL ) {
     romnum = (ctrldata & 0x07) - 1;                       
     validrom = (romnum>=0) && (romnum <MAXROMS); 
+#ifdef TESTRIG    
+    digitalWrite(TEST5,!digitalRead(TEST5));
+#endif    
   } else if ( RAMSEL ) { 
     ramblknum = (ctrldata & 0x07);                       
+#ifdef TESTRIG    
+    digitalWrite(TEST4,!digitalRead(TEST4));
+#endif    
   } else if ( ROMACCESS ) {
     if ( newaccess && validrom ) {
 #ifdef USEWAITSTATE
@@ -155,12 +187,21 @@ void loop() {
       CTRLDATA_OUT  = (ROMDIS | romdata[romnum][address]);  // Write new data 
       CTRLDATA_MODE = (TRI_ROMDIS & TRI_DATA) ;             // Disable WAIT_B driver (deassert WAIT_B) only, leave others enabled
       newaccess = false;    
+#ifdef TESTRIG      
+      digitalWrite(TEST3,!digitalRead(TEST3));
+#endif      
     } // else DATABUS and ROMDIS state held here from previous action
   } else if ( RAMRDACCESS ) {
     if ( newaccess && (block >=0 )) {         
+#ifdef USEWAITSTATE
+      CTRLDATA_MODE = (TRI_WAIT_B & TRI_RAMDIS & TRI_DATA); // Enable output drivers, asserting WAIT_B
+#endif
       CTRLDATA_OUT  = ( RAMDIS | ramdata[block][address]); // Write new data to databus and set RAMDIS high
-      CTRLDATA_MODE = ( TRI_RAMDIS & TRI_DATA) ;           // Enable RAMDIS and data drivers
-      newaccess = false;    
+      CTRLDATA_MODE = ( TRI_RAMDIS & TRI_DATA) ;           // Disable WAIT_B driver, enable RAMDIS and data drivers
+      newaccess = false;        
+#ifdef TESTRIG        
+      digitalWrite(TEST2,!digitalRead(TEST2));      
+#endif      
     }
   } else if ( RAMWRACCESS ) {
     if (block>=0) {
@@ -170,8 +211,8 @@ void loop() {
     CTRLDATA_MODE = 0xFFFF; // Not a ROM access so disable all drivers
     newaccess = true;    
   }
-
 #ifdef TESTRIG
   // toggle GPIO here to measure loop time
+  digitalWrite(TEST1, !digitalRead(TEST1))
 #endif  
 }
