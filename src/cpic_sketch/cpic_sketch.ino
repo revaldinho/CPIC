@@ -24,9 +24,6 @@
  * The 'romsel' computation could be done via an external NOR3 if necessary to gain
  * a little speed.
  *
- * ROM addresses are only 14bits long, so tying off the two top address bits externally
- * could save a little more computation needed to mask the 16bit port value down to
- * 14 value bits.
  *
  * IO Register programming:
  *
@@ -101,10 +98,10 @@
 #define MAXROMS         1
 #define ROMSIZE         16384
 #define RAMBLKSIZE      16384
-#define ROMACCESS       ~(ctrldata&ROMEN_B)
+#define ROMACCESS       (~(ctrldata&ROMEN_B) && (address&ADR15))
 #define RAMRDACCESS     ~(ctrldata&RAMRD_B)
 #define RAMWRACCESS     ~(ctrldata&MREQ_B || (ctrldata&WR_B))
-#define ROMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13)) 
+#define ROMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13))  
 #define RAMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR15))
 
 
@@ -165,7 +162,7 @@ void loop() {
   int block;
     
   ctrldata = CTRLDATA_IN ;                                  
-  address  = ADDR_IN & 0x3FFF ;                           // Get valid lower 14b of address         
+  address  = ADDR_IN ;                                    
   block    = ramblocklut[(address>>14)&0x03][ramblknum];
   
   if ( ROMSEL ) {
@@ -184,7 +181,7 @@ void loop() {
 #ifdef USEWAITSTATE
       CTRLDATA_MODE = (TRI_WAIT_B & TRI_ROMDIS & TRI_DATA); // Enable output drivers, asserting WAIT_B
 #endif
-      CTRLDATA_OUT  = (ROMDIS | romdata[romnum][address]);  // Write new data 
+      CTRLDATA_OUT  = (ROMDIS | romdata[romnum][address&0x3FFF]);  // Write new data 
       CTRLDATA_MODE = (TRI_ROMDIS & TRI_DATA) ;             // Disable WAIT_B driver (deassert WAIT_B) only, leave others enabled
       newaccess = false;    
 #ifdef TESTRIG      
@@ -196,7 +193,7 @@ void loop() {
 #ifdef USEWAITSTATE
       CTRLDATA_MODE = (TRI_WAIT_B & TRI_RAMDIS & TRI_DATA); // Enable output drivers, asserting WAIT_B
 #endif
-      CTRLDATA_OUT  = ( RAMDIS | ramdata[block][address]); // Write new data to databus and set RAMDIS high
+      CTRLDATA_OUT  = ( RAMDIS | ramdata[block][address&0x3FFF]); // Write new data to databus and set RAMDIS high
       CTRLDATA_MODE = ( TRI_RAMDIS & TRI_DATA) ;           // Disable WAIT_B driver, enable RAMDIS and data drivers
       newaccess = false;        
 #ifdef TESTRIG        
@@ -205,7 +202,7 @@ void loop() {
     }
   } else if ( RAMWRACCESS ) {
     if (block>=0) {
-      ramdata[block][address] = (ctrldata & DATA);         // Write to internal RAM
+      ramdata[block][address&0x3FFF] = (ctrldata & DATA);         // Write to internal RAM
     }
   } else {
     CTRLDATA_MODE = 0xFFFF; // Not a ROM access so disable all drivers
@@ -213,6 +210,6 @@ void loop() {
   }
 #ifdef TESTRIG
   // toggle GPIO here to measure loop time
-  digitalWrite(TEST1, !digitalRead(TEST1))
+  digitalWrite(TEST1, !digitalRead(TEST1));
 #endif  
 }
