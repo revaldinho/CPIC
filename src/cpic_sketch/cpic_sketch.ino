@@ -55,42 +55,43 @@
 
 // Define only if not fast enough to serve ROM bytes in time available
 #define USEWAITSTATE    1
-// Define only if measuring response times via GPIOs (slows down system)
-#define TESTRIG         1
 
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
-#define ROMEN_B         0x0100
-#define ROMDIS          0x0200
-#define IORQ_B          0x0400
-#define MREQ_B          0x0800
-#define WR_B            0x1000
-#define WAIT_B          0x2000
-#define RAMRD_B         0x3000
-#define RAMDIS          0x4000
+#define ROMEN_B         0x0001
+#define ROMDIS          0x0002
+#define IORQ_B          0x0004
+#define MREQ_B          0x0008
+#define WR_B            0x0010
+#define WAIT_B          0x0020
+#define RAMRD_B         0x0040
+#define RAMDIS          0x0080
 
 #define ADR13           1 << 13
 #define ADR15           1 << 15
 
 // Define negative TRISTATE masks: 0 = output, 1 = input
-#define TRI_DATA        ~DATA
-#define TRI_ROMDIS      ~ROMDIS
-#define TRI_WAIT_B      ~WAIT_B
-#define TRI_RAMDIS      ~RAMDIS
+#define TRI_EN_DATA        ~DATA
+#define TRI_EN_ROMDIS      ~ROMDIS
+#define TRI_EN_WAIT_B      ~WAIT_B
+#define TRI_EN_RAMDIS      ~RAMDIS
 
-// Port Assignments
-#define CTRLDATA_MODE   TRISB          // use PORT B for ctrl + data bits
-#define CTRLDATA_IN     PORTB
-#define CTRLDATA_OUT    LATB
-#define ADDR_MODE       TRISC          // use PORT C for address bits
-#define ADDR_IN         PORTC
-#define ADDR_OUT        LATC
+// Port Assignment - Breadboard friendly allocation
+#define DATA_MODE   TRISE          // use PORT E data bits [7:0]
+#define DATA_IN     PORTE
+#define DATA_OUT    LATE
+#define ADDR_MODE   TRISB          // use PORT B for address bits [15:0]
+#define ADDR_IN     PORTB
+#define ADDR_OUT    LATB
+#define CTRL_MODE   TRISA          // use PORT A for ctrl bits [7:0]
+#define CTRL_IN     PORTA
+#define CTRL_OUT    LATA
+#define TEST_MODE   TRISG          // use PORT G for test bits [7:0]
+#define TEST_IN     PORTG
+#define TEST_OUT    LATG
+
 
 // ---- Define some Test rig pins on Port G
-
-#define TEST5           84
-#define TEST4           83
-#define TEST3           82
 #define TEST2           79
 #define TEST1           78
 
@@ -98,13 +99,12 @@
 #define MAXROMS         1
 #define ROMSIZE         16384
 #define RAMBLKSIZE      16384
-#define ROMACCESS       (~(ctrldata&ROMEN_B) && (address&ADR15))
-#define RAMRDACCESS     ~(ctrldata&RAMRD_B)
-#define RAMWRACCESS     ~(ctrldata&MREQ_B || (ctrldata&WR_B))
-#define ROMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13))  
-#define RAMSEL          ~((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR15))
-
-
+//#define ROMACCESS       false //(!(ctrl&ROMEN_B) && (address&ADR15))
+#define RAMRDACCESS     false //!(ctrl&RAMRD_B)
+#define RAMWRACCESS     false //!(ctrl&MREQ_B || (ctrl&WR_B))
+#define ROMSEL          false //!((ctrl&IORQ_B) || (ctrl&WR_B) || (address&ADR13))  
+#define RAMSEL          false //!((ctrl&IORQ_B) || (ctrl&WR_B) || (address&ADR15))
+#define ROMACCESS       !(ctrl&0x1) 
 
 // Global variables
 const char flashdata[MAXROMS][ROMSIZE] = { 
@@ -133,83 +133,91 @@ int romnum = 0;
 int ramblknum = 0;
 boolean validrom = false;
 boolean newaccess = true ;
-
+int address;
+int ctrl;
+int data;
+int block;
+    
 void setup() {
-  CTRLDATA_MODE = 0xFFFF ; // Tristate all ctrl/data outputs
+  DATA_MODE     = 0xFFFF ; // Tristate all data outputs
+  CTRL_MODE     = 0xFFFF ; // Tristate all ctrl outputs
   ADDR_MODE     = 0xFFFF ; // Tristate all address outputs
-  CTRLDATA_OUT  = 0x0000 ; // Preset WAIT_B to zero before first assertion
+  CTRL_OUT      = 0x0000 ; // Preset WAIT_B to zero before first assertion
   memcpy(romdata, flashdata,  MAXROMS*ROMSIZE) ; // Copy flash data to RAM on startup
-
-#ifdef TESTRIG
-  pinMode(TEST1, OUTPUT);
-  pinMode(TEST2, OUTPUT);
-  pinMode(TEST3, OUTPUT);
-  pinMode(TEST4, OUTPUT);
-  pinMode(TEST5, OUTPUT);
-
-  digitalWrite(TEST1, LOW);
-  digitalWrite(TEST2, LOW);
-  digitalWrite(TEST3, LOW);
-  digitalWrite(TEST4, LOW);
-  digitalWrite(TEST5, LOW);
-#endif
   
+  TEST_MODE     = 0x0000 ; // Enable all test port outputs
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+  TEST_OUT = 0x0000;
+
+
+  // Breadboard noodling
+  ramblknum = 1;
+  romnum = 1;
+  validrom = true;
 }
 
 void loop() {
-  int address;
-  int ctrldata;
-  int block;
-    
-  ctrldata = CTRLDATA_IN ;                                  
-  address  = ADDR_IN ;                                    
-  block    = ramblocklut[(address>>14)&0x03][ramblknum];
-  
-  if ( ROMSEL ) {
-    romnum = (ctrldata & 0x07) - 1;                       
-    validrom = (romnum>=0) && (romnum <MAXROMS); 
-#ifdef TESTRIG    
-    digitalWrite(TEST5,!digitalRead(TEST5));
-#endif    
-  } else if ( RAMSEL ) { 
-    ramblknum = (ctrldata & 0x07);                       
-#ifdef TESTRIG    
-    digitalWrite(TEST4,!digitalRead(TEST4));
-#endif    
-  } else if ( ROMACCESS ) {
-    if ( newaccess && validrom ) {
-#ifdef USEWAITSTATE
-      CTRLDATA_MODE = (TRI_WAIT_B & TRI_ROMDIS & TRI_DATA); // Enable output drivers, asserting WAIT_B
-#endif
-      CTRLDATA_OUT  = (ROMDIS | romdata[romnum][address&0x3FFF]);  // Write new data 
-      CTRLDATA_MODE = (TRI_ROMDIS & TRI_DATA) ;             // Disable WAIT_B driver (deassert WAIT_B) only, leave others enabled
-      newaccess = false;    
-#ifdef TESTRIG      
-      digitalWrite(TEST3,!digitalRead(TEST3));
-#endif      
-    } // else DATABUS and ROMDIS state held here from previous action
-  } else if ( RAMRDACCESS ) {
-    if ( newaccess && (block >=0 )) {         
-#ifdef USEWAITSTATE
-      CTRLDATA_MODE = (TRI_WAIT_B & TRI_RAMDIS & TRI_DATA); // Enable output drivers, asserting WAIT_B
-#endif
-      CTRLDATA_OUT  = ( RAMDIS | ramdata[block][address&0x3FFF]); // Write new data to databus and set RAMDIS high
-      CTRLDATA_MODE = ( TRI_RAMDIS & TRI_DATA) ;           // Disable WAIT_B driver, enable RAMDIS and data drivers
-      newaccess = false;        
-#ifdef TESTRIG        
-      digitalWrite(TEST2,!digitalRead(TEST2));      
-#endif      
-    }
-  } else if ( RAMWRACCESS ) {
-    if (block>=0) {
-      ramdata[block][address&0x3FFF] = (ctrldata & DATA);         // Write to internal RAM
-    }
-  } else {
-    CTRLDATA_MODE = 0xFFFF; // Not a ROM access so disable all drivers
+  ctrl     = CTRL_IN; 
+                                   
+  if ( (ctrl&0xFF) == 0x00FF ) {
+    // Check if any control lines are active first and bail out as soon as possible
+    // so that loop can be responsive to next control line change
+    CTRL_MODE = 0xFFFF;
+    DATA_MODE = 0xFFFF;
     newaccess = true;    
+    TEST_OUT = 0x0000;                 
+  } else {
+    // Control lines are active so now need to go through the long if-else statement
+    // to check which event to handle
+    address  = ADDR_IN;
+    
+    if ( ROMSEL ) {
+      data     = DATA_IN;  
+      romnum = (data & 0x07) - 1;  
+      validrom = (romnum>=0) && (romnum <MAXROMS); 
+      TEST_OUT = 0x0001;                   
+    } else if ( RAMSEL ) { 
+      data     = DATA_IN ;
+      ramblknum = (data & 0x07);                       
+      TEST_OUT = 0x0020;                 
+    } else if ( ROMACCESS ) {
+      if ( newaccess && validrom ) {
+#ifdef USEWAITSTATE
+        CTRL_MODE = TRI_EN_WAIT_B & TRI_EN_ROMDIS;   // Enable output drivers, asserting WAIT_B
+#endif
+        CTRL_OUT  = ROMDIS;
+        DATA_OUT  = romdata[romnum][address&0x3FFF]; // Write new data 
+        DATA_MODE = TRI_EN_DATA;
+        CTRL_MODE = TRI_EN_ROMDIS;                   // Disable WAIT_B driver (deassert WAIT_B) only, leave others enabled
+        newaccess = false;         
+      } // else DATABUS and ROMDIS state held here from previous action
+      TEST_OUT = 0x0001;                   
+    } else if ( RAMRDACCESS ) {
+      block    = ramblocklut[(address>>14)&0x03][ramblknum];  
+      
+      if ( newaccess && (block >=0 )) {         
+#ifdef USEWAITSTATE
+        CTRL_MODE = TRI_EN_WAIT_B & TRI_EN_RAMDIS;// Enable output drivers, asserting WAIT_B
+#endif
+        CTRL_OUT = RAMDIS;                         // Set RAMDIS high
+        DATA_OUT = ramdata[block][address&0x3FFF]; // Write new data to databus 
+        DATA_MODE = TRI_EN_DATA ;                  // Enable data drivers
+        CTRL_MODE = TRI_EN_RAMDIS ;                // Disable WAIT_B driver, enable RAMDIS
+        newaccess = false;        
+      } // else DATABUS and RAMDIS state held here from previous action
+    } else if ( RAMWRACCESS ) {
+      data     = DATA_IN;
+      block    = ramblocklut[(address>>14)&0x03][ramblknum];  
+  
+      if (block>=0) {
+        ramdata[block][address&0x3FFF] = data;         // Write to internal RAM
+      }   
+    } else {
+      CTRL_MODE = 0xFFFF; // Not a ROM access so disable all drivers
+      DATA_MODE = 0xFFFF;
+      newaccess = true;    
+      TEST_OUT = 0x0000;                 
+    }
   }
-#ifdef TESTRIG
-  // toggle GPIO here to measure loop time
-  digitalWrite(TEST1, !digitalRead(TEST1));
-#endif  
 }
