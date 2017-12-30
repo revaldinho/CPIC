@@ -156,8 +156,10 @@ void loop() {
         newaccess = false;         
       }  // else DATABUS and ROMDIS state held here from previous action
 #else
+    if (validrom) {
       CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
       CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA 
+    }
 #endif
 
       TEST_OUT = 0x0001;                   
