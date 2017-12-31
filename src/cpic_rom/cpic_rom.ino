@@ -54,7 +54,7 @@
 #include <string.h>
 
 // Define only if not fast enough to serve ROM bytes in time available
-#define USEWAITSTATE    1
+//#define USEWAITSTATE    1
 
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
@@ -74,9 +74,9 @@
 #define TRI_EN_RAMDIS      ~RAMDIS
 
 // Port Assignment - Breadboard friendly allocation
-#define CTRLDATA_MODE   TRISE          // use PORT D data bits [7:0], ctrl [15:8]
-#define CTRLDATA_IN     PORTE
-#define CTRLDATA_OUT    LATE
+#define CTRLDATA_MODE   TRISD          // use PORT D data bits [7:0], ctrl [15:8]
+#define CTRLDATA_IN     PORTD
+#define CTRLDATA_OUT    LATD
 #define ADDR_MODE       TRISB          // use PORT B for address bits [15:0]
 #define ADDR_IN         PORTB
 #define ADDR_OUT        LATB
@@ -92,7 +92,7 @@
 #define MAXROMS         1
 #define ROMSIZE         16384
 #define ROMACCESS       (!(ctrldata&ROMEN_B) && (ctrldata&ADR15))
-#define ROMSEL          false //!((ctrldata&IORQ_B) || (ctrldata&WR_B) || (ctrldata&ADR13))  
+#define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (ctrldata&ADR13))  
 
 // Global variables
 const char flashdata[MAXROMS][ROMSIZE] = { 
@@ -131,23 +131,12 @@ void setup() {
 }
 
 void loop() {
-  ctrldata     = CTRLDATA_IN; 
-                                   
-  if ( (ctrldata&0xFF00) == 0xFF00 ) {
-    // Check if any control lines are active first and bail out as soon as possible
-    // so that loop can be responsive to next control line change
-    CTRLDATA_MODE = 0xFFFF;
-#ifdef USEWAITSTATE    
-    newaccess = true;
-#endif    
-    TEST_OUT = 0x0000;                 
-  } else {
-    // Control lines are active so now need to go through the long if-else statement
-    // to check which event to handle. Put operations which need to send data back to
-    // CPC higher up the if to get better response.
+
+//  while ( true ) {
+    ctrldata     = CTRLDATA_IN; 
+                                     
     if ( ROMACCESS ) {
       address  = ADDR_IN;
-
 #ifdef USEWAITSTATE
       if ( newaccess && validrom ) {
         CTRLDATA_MODE = TRI_EN_WAIT_B & TRI_EN_ROMDIS & TRI_EN_DATA;   // Enable output drivers, asserting WAIT_B
@@ -156,12 +145,11 @@ void loop() {
         newaccess = false;         
       }  // else DATABUS and ROMDIS state held here from previous action
 #else
-    if (validrom) {
-      CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
-      CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA 
-    }
+      if (validrom) {
+        CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
+        CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA 
+      }
 #endif
-
       TEST_OUT = 0x0001;                   
     } else if ( ROMSEL ) {
       romnum = (ctrldata & 0x07) - 1;  
@@ -174,5 +162,5 @@ void loop() {
 #endif    
       TEST_OUT = 0x0000;                 
     }
-  }
+//  }
 }
