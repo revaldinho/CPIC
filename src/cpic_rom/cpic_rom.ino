@@ -7,12 +7,7 @@
  * PIC32 has 128KBytes RAM available for program and data, plus a further
  * 512KBytes Flash memory for static data.  
  *
- * All ROM data is stored in flash memory to be persistent, but copied over into 
- * RAM on booting the board to get faster access: flash memory has a 30MHz read rate
- * so reading directly would cause 3 wait states per access whereas the RAM runs at
- * the full 80MHz core speed. Copying the ROM contents will take a while so may 
- * need to reboot the CPC after the ROM board: if sharing the CPC PSU then need
- * to provide a CPC reset button on the shield.
+ * All ROM data is stored in flash memory.
  *
  * PIC32 has a 256byte instruction cache to minimise wait states on executing from
  * flash. Ideally loop() should fit in this cache...
@@ -23,7 +18,6 @@
  * ROM Selection performed by writing the ROM number to an IO address with A13 low.
  * The 'romsel' computation could be done via an external NOR3 if necessary to gain
  * a little speed.
- *
  *
  * IO Register programming:
  *
@@ -52,6 +46,7 @@
  *       
  */
 
+#define BREADBOARDTEST   1
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
 #define ROMEN_B         0x0100
@@ -60,14 +55,12 @@
 #define MREQ_B          0x0800
 #define WR_B            0x1000
 #define WAIT_B          0x2000
-#define ADR13           0x4000              // Read A13, A15 also in the control word so we can distinguish
-#define ADR15           0x8000              // between ROMSEL and ROMACCESS without reading address port
+#define ADR13           0x4000     // ROM only version connects A13,15 also to ctrldata word 
+#define ADR15           0x8000     // so that we can identify a ROM event by just reading one port
 
 // Define negative TRISTATE masks: 0 = output, 1 = input
 #define TRI_EN_DATA        ~DATA
 #define TRI_EN_ROMDIS      ~ROMDIS
-#define TRI_EN_WAIT_B      ~WAIT_B
-#define TRI_EN_RAMDIS      ~RAMDIS
 
 // Port Assignment - Breadboard friendly allocation
 #define CTRLDATA_MODE   TRISD          // use PORT D data bits [7:0], ctrl [15:8]
@@ -76,7 +69,7 @@
 #define ADDR_MODE       TRISB          // use PORT B for address bits [15:0]
 #define ADDR_IN         PORTB
 #define ADDR_OUT        LATB
-#define TEST_MODE       TRISG          // use PORT G for test bits [7:0]
+#define TEST_MODE       TRISG          // use PORT G for test bits [7:0] if required
 #define TEST_IN         PORTG
 #define TEST_OUT        LATG
 
@@ -87,75 +80,55 @@
 // ---- Constants and macros
 #define MAXROMS         1
 #define ROMSIZE         16384
-#define ROMACCESS       (!(ctrldata&ROMEN_B) && (ctrldata&ADR15))
+#define ROMACCESS       (!(ctrldata&ROMEN_B)) && (ctrldata&ADR15)
 #define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (ctrldata&ADR13))  
 
-// Global variables
+// ---- Global variables
 
-// ROM data will be accessed directly from Flash
+// ROM data will be accessed directly from Flash. Each csv file should have exactly 
+// 16384 entries to have one map to each ROM here.
 const char romdata[MAXROMS][ROMSIZE] = { 
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 //#include "ROM1.csv"
 //#include "ROM2.csv"
 //#include "ROM3.csv"
 };
-
-int romnum = 0;
-int ramblknum = 0;
-boolean validrom = false;
-
-#ifdef USEWAITSTATE
-boolean newaccess = true ;
-#endif
-
-int address;
-int ctrldata;
     
 void setup() {
   CTRLDATA_MODE = 0xFFFF ; // Tristate all ctrl outputs
   ADDR_MODE     = 0xFFFF ; // Tristate all address outputs
   CTRLDATA_OUT  = 0x0000 ; // Preset WAIT_B to zero before first assertion  
-  TEST_MODE     = 0x0000 ; // Enable all test port outputs
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH);
-  TEST_OUT = 0x0000;
-
-  // Breadboard noodling
-  romnum = 1;
-  validrom = true;
+  // ADDR_MODE line above doesn't seem to put all address bits (PortB) in input mode...
+  for ( int i=54 ; i<70; i++ ) {
+    pinMode(i,INPUT);
+  }
 }
 
 void loop() {
-
-  while ( true ) {
-    ctrldata     = CTRLDATA_IN; 
-                                     
-    if ( ROMACCESS ) {
-      address  = ADDR_IN;
-#ifdef USEWAITSTATE
-      if ( newaccess && validrom ) {
-        CTRLDATA_MODE = TRI_EN_WAIT_B & TRI_EN_ROMDIS & TRI_EN_DATA;   // Enable output drivers, asserting WAIT_B
-        CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
-        CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Drop wait signal but keep ROMDIS and DATA asserted
-        newaccess = false;         
-      }  // else DATABUS and ROMDIS state held here from previous action
+  int ctrldata;
+  int address;
+  
+#ifdef BREADBOARDTEST
+  int romnum = 1;            
+  boolean validrom = true;
 #else
+  int romnum = 0;            
+  boolean validrom = false;
+#endif
+  
+  while ( true ) {
+    ctrldata = CTRLDATA_IN; 
+    if ( ROMACCESS ) {
+      address  = ADDR_IN;                                  
       if (validrom) {
         CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
         CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA 
       }
-#endif
-      TEST_OUT = 0x0001;                   
     } else if ( ROMSEL ) {
       romnum = (ctrldata & 0x07) - 1;  
       validrom = (romnum>=0) && (romnum <MAXROMS); 
-      TEST_OUT = 0x0001;                   
     } else {
       CTRLDATA_MODE = 0xFFFF; // Not a ROM access so disable all drivers
-#ifdef USEWAITSTATE
-      newaccess = true;
-#endif    
-      TEST_OUT = 0x0000;                 
     }
   }
 }
