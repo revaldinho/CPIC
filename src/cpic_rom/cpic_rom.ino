@@ -51,10 +51,6 @@
  *                 (and so on)
  *       
  */
-#include <string.h>
-
-// Define only if not fast enough to serve ROM bytes in time available
-//#define USEWAITSTATE    1
 
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
@@ -95,14 +91,15 @@
 #define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (ctrldata&ADR13))  
 
 // Global variables
-const char flashdata[MAXROMS][ROMSIZE] = { 
+
+// ROM data will be accessed directly from Flash
+const char romdata[MAXROMS][ROMSIZE] = { 
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 //#include "ROM1.csv"
 //#include "ROM2.csv"
 //#include "ROM3.csv"
 };
 
-char romdata[MAXROMS][ROMSIZE] ;
 int romnum = 0;
 int ramblknum = 0;
 boolean validrom = false;
@@ -117,9 +114,7 @@ int ctrldata;
 void setup() {
   CTRLDATA_MODE = 0xFFFF ; // Tristate all ctrl outputs
   ADDR_MODE     = 0xFFFF ; // Tristate all address outputs
-  CTRLDATA_OUT  = 0x0000 ; // Preset WAIT_B to zero before first assertion
-  memcpy(romdata, flashdata,  MAXROMS*ROMSIZE) ; // Copy flash data to RAM on startup
-  
+  CTRLDATA_OUT  = 0x0000 ; // Preset WAIT_B to zero before first assertion  
   TEST_MODE     = 0x0000 ; // Enable all test port outputs
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
@@ -132,7 +127,7 @@ void setup() {
 
 void loop() {
 
-//  while ( true ) {
+  while ( true ) {
     ctrldata     = CTRLDATA_IN; 
                                      
     if ( ROMACCESS ) {
@@ -162,5 +157,5 @@ void loop() {
 #endif    
       TEST_OUT = 0x0000;                 
     }
-//  }
+  }
 }
