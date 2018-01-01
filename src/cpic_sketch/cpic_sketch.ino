@@ -57,14 +57,17 @@
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
 #define ROMEN_B         0x0100
-#define ROMDIS          0x0200
-#define IORQ_B          0x0400
-#define MREQ_B          0x0800
-#define WR_B            0x1000
+#define IORQ_B          0x0200
+#define MREQ_B          0x0400
+#define WR_B            0x0800
+#define RAMRD_B         0x1000
 #define WAIT_B          0x2000
-#define RAMRD_B         0x4000
+#define ROMDIS          0x4000
 #define RAMDIS          0x8000
 
+#define MASK            0x1F00
+
+// ---- Bit masks for address word
 #define ADR13           0x2000
 #define ADR15           0x8000
 
@@ -100,6 +103,7 @@
 #define RAMRDACCESS     !(ctrldata&RAMRD_B)
 #define RAMWRACCESS     !(ctrldata&MREQ_B || (ctrldata&WR_B))
 #define RAMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR15))
+#define ROMRAMSEL       !((ctrldata&IORQ_B) || (ctrldata&WR_B) )
 
 // Global variables
 const char romdata[MAXROMS][ROMSIZE] = { 
@@ -142,30 +146,38 @@ void loop() {
 
   while (true) {
     ctrldata = CTRLDATA_IN; 
-    address  = ADDR_IN;
-    if ( ROMACCESS ) {
-      if ( validrom ) {
-        CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
-        CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA        
-      } // else DATABUS and ROMDIS state held here from previous action
-    } else if ( RAMRDACCESS ) {
-      ramblock = ramblocklut[(address>>14)&0x03][ramblknum];        
-      if ( ramblock >=0 ) {         
-        CTRLDATA_OUT = RAMDIS | ramdata[ramblock][address&0x3FFF]; // Write new data to databus 
-        CTRLDATA_MODE = TRI_EN_DATA & TRI_EN_RAMDIS ;              // Disable WAIT_B driver, enable RAMDIS and DATA drivers
-      } // else DATABUS and RAMDIS state held here from previous action
-    } else if ( RAMWRACCESS ) {
-      ramblock = ramblocklut[(address>>14)&0x03][ramblknum];    
-      if (ramblock>=0) {
-        ramdata[ramblock][address&0x3FFF] = ctrldata&DATA;         // Write to internal RAM
-      }  
-    } else if ( ROMSEL ) {
-      romnum = (ctrldata & 0x07) - 1;  
-      validrom = (romnum>=0) && (romnum <MAXROMS); 
-    } else if ( RAMSEL ) { 
-      ramblknum = (ctrldata & 0x07);                       
-    } else {
+    if ((ctrldata & MASK) == MASK) {
       CTRLDATA_MODE = 0xFFFF; // Not a ROM/RAM access so disable all drivers              
+    } else {
+      address  = ADDR_IN;
+      if ( ROMACCESS ) {
+        if ( validrom ) {
+          CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
+          CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA        
+        } // else DATABUS and ROMDIS state held here from previous action
+      } else if ( RAMRDACCESS ) {
+        ramblock = ramblocklut[(address>>14)&0x03][ramblknum];        
+        if ( ramblock >=0 ) {         
+          CTRLDATA_OUT = RAMDIS | ramdata[ramblock][address&0x3FFF]; // Write new data to databus 
+          CTRLDATA_MODE = TRI_EN_DATA & TRI_EN_RAMDIS ;              // Disable WAIT_B driver, enable RAMDIS and DATA drivers
+        } // else DATABUS and RAMDIS state held here from previous action
+      } else if ( RAMWRACCESS ) {
+        ramblock = ramblocklut[(address>>14)&0x03][ramblknum];    
+        if (ramblock>=0) {
+          ramdata[ramblock][address&0x3FFF] = ctrldata&DATA;         // Write to internal RAM
+        }  
+      } else if ( ROMRAMSEL ) {
+        if ( !(address&ADR13)) {                                    // ROM selection if ADR13 low
+          romnum = (ctrldata & 0x07) - 1;  
+          validrom = (romnum>=0) && (romnum <MAXROMS); 
+        } else if ( !(address&ADR15)){                              // RAM bank selection if ADR15 low
+          ramblknum = (ctrldata & 0x07);                       
+        } else {
+          CTRLDATA_MODE = 0xFFFF; // Not a ROM/RAM access so disable all drivers              
+        }
+      } else {
+        CTRLDATA_MODE = 0xFFFF; // Not a ROM/RAM access so disable all drivers              
+      }
     }
   }
 }

@@ -50,13 +50,12 @@
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
 #define ROMEN_B         0x0100
-#define ROMDIS          0x0200
-#define IORQ_B          0x0400
-#define MREQ_B          0x0800
-#define WR_B            0x1000
-#define WAIT_B          0x2000
-#define ADR13           0x4000     // ROM only version connects A13,15 also to ctrldata word 
-#define ADR15           0x8000     // so that we can identify a ROM event by just reading one port
+#define IORQ_B          0x0200
+#define MREQ_B          0x0400
+#define WR_B            0x0800
+#define ADR13           0x1000     // ROM only version connects A13,15 also to ctrldata word 
+#define ADR15           0x2000     // so that we can identify a ROM event by just reading one port
+#define ROMDIS          0x4000
 
 // Define negative TRISTATE masks: 0 = output, 1 = input
 #define TRI_EN_DATA        ~DATA
