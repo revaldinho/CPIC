@@ -101,7 +101,7 @@
 #define TEST1           78
 
 // ---- Constants and macros
-#define MAXROMS         1
+#define MAXROMS         16
 #define ROMSIZE         16384
 #define ROMACCESS       (!(ctrldata&ROMEN_B)) 
 #define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13))  
@@ -122,12 +122,12 @@ const char upperrom[MAXROMS][ROMSIZE] = {
 //#include "ROM3.csv"
 };
 
-const boolean valid_upperrom[MAXROMS] = { true };
-//  true,  false, false, false,
-//  false, false, false, false,
-//  false, false, false, false,
-//  false, false, false, false
-//};
+const boolean valid_upperrom[MAXROMS] = { 
+  true,  false, false, false,
+  false, false, false, false,
+  false, false, false, false,
+  false, false, false, false
+};
 
 // This will be the content of the AMSTRAD Firmware ROM to allow replacement
 // of a CPC464 or 664 ROM with that from a 6128.
@@ -168,6 +168,7 @@ void loop() {
 
     // Wait here for a transaction to start
     while (((ctrldata=CTRLDATA_IN)&MASK) == MASK) {
+       // Always sample the address which becomes valid before the control signals go active
        address  = ADDR_IN;
     } 
     
