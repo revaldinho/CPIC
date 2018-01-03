@@ -18,14 +18,16 @@
  * PIC32 has a 256byte instruction cache to minimise wait states on executing from
  * flash. Ideally loop() should fit in this cache...
  *
- * NB ROMs are numbered 0-MAXROMS-1 here, but map to CPC numbers 1-MAXROMS because
- * slot 0 is for the firmware and unlikely to be replaced
- *
  * ROM Selection performed by writing the ROM number to an IO address with A13 low.
  * The 'romsel' computation could be done via an external NOR3 if necessary to gain
  * a little speed.
  * 
- * RAM expansion models a 64KBytes DKtronics unit
+ * RAM expansion models a 64KBytes DKtronics unit. See 
+ * http://www.cpcwiki.eu/imgs/8/83/DK%27Tronics_Peripheral_-_Technical_Manual_%28Edition_1%29.pdf
+ * 
+ * Lower ROM replacement is implemented also in this code. Replacing BASIC and Firmware
+ * ROMS on a 664 or 464 with those from a 6128 will effectively turn those machines into
+ * a 6128 in conjunction with the 64KBytes RAM expansion.
  *
  *
  * IO Register programming:
@@ -54,6 +56,10 @@
  *                 (and so on)
  *       
  */
+
+
+#define LOWER_ROM_ENABLE 1
+
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
 #define ROMEN_B         0x0100
@@ -65,7 +71,8 @@
 #define ROMDIS          0x4000
 #define RAMDIS          0x8000
 
-#define MASK            0x1F00
+#define RAMBANKMASK     0x00C0   // Top two bits of DATA must be set for a valid RAM bank selection
+#define MASK            0x1F00   // Control bit mask
 
 // ---- Bit masks for address word
 #define ADR13           0x2000
@@ -96,7 +103,7 @@
 // ---- Constants and macros
 #define MAXROMS         1
 #define ROMSIZE         16384
-#define ROMACCESS       (!(ctrldata&ROMEN_B)) && (address&ADR15)
+#define ROMACCESS       (!(ctrldata&ROMEN_B)) 
 #define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13))  
 
 #define RAMBLKSIZE      16384
@@ -106,11 +113,26 @@
 #define ROMRAMSEL       !((ctrldata&IORQ_B) || (ctrldata&WR_B) )
 
 // Global variables
-const char romdata[MAXROMS][ROMSIZE] = { 
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
+const char upperrom[MAXROMS][ROMSIZE] = { 
+0,0,0,0,0
+//#include "/Users/richarde/Documents/Development/git/CPiC/src/BASIC_1.0.CSV"
+//#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 //#include "ROM1.csv"
 //#include "ROM2.csv"
 //#include "ROM3.csv"
+};
+
+const boolean valid_upperrom[MAXROMS] = { true };
+//  true,  false, false, false,
+//  false, false, false, false,
+//  false, false, false, false,
+//  false, false, false, false
+//};
+
+// This will be the content of the AMSTRAD Firmware ROM to allow replacement
+// of a CPC464 or 664 ROM with that from a 6128.
+const char lowerrom[ROMSIZE] = {
+#include "/Users/richarde/Documents/Development/git/CPiC/src/OS_464.CSV"
 };
 
 char ramdata[4][RAMBLKSIZE] ;              //  64K for D'ktronics RAM exp
@@ -122,7 +144,6 @@ int ramblocklut [4][8] = {                 // mapping for D'ktronics expansion R
   -1,-1, 0,-1, -1, -1, -1, -1,
 };
 
-    
 void setup() {
   CTRLDATA_MODE = 0xFFFF ; // Tristate all ctrl/data outputs
   ADDR_MODE     = 0xFFFF ; // Tristate all address outputs
@@ -133,51 +154,59 @@ void setup() {
   for ( int i=54 ; i<70; i++ ) {
     pinMode(i,INPUT);
   }
- 
 }
 
 void loop() {
-  int romnum = 1;    // Should be '0' but noodle for Breadboard testing
+  int romnum = 0;    
   int ramblknum = 1; // Should be '0' ... as above
   int ctrldata;
   int address;
   int ramblock;
-  boolean validrom = true;
-
+  int dataout;
+  
   while (true) {
-    ctrldata = CTRLDATA_IN; 
-    if ((ctrldata & MASK) == MASK) {
-      CTRLDATA_MODE = 0xFFFF; // Not a ROM/RAM access so disable all drivers              
-    } else {
-      address  = ADDR_IN;
-      if ( ROMACCESS ) {
-        if ( validrom ) {
-          CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
-          CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA        
-        } // else DATABUS and ROMDIS state held here from previous action
-      } else if ( RAMRDACCESS ) {
-        ramblock = ramblocklut[(address>>14)&0x03][ramblknum];        
-        if ( ramblock >=0 ) {         
-          CTRLDATA_OUT = RAMDIS | ramdata[ramblock][address&0x3FFF]; // Write new data to databus 
-          CTRLDATA_MODE = TRI_EN_DATA & TRI_EN_RAMDIS ;              // Disable WAIT_B driver, enable RAMDIS and DATA drivers
-        } // else DATABUS and RAMDIS state held here from previous action
-      } else if ( RAMWRACCESS ) {
-        ramblock = ramblocklut[(address>>14)&0x03][ramblknum];    
-        if (ramblock>=0) {
-          ramdata[ramblock][address&0x3FFF] = ctrldata&DATA;         // Write to internal RAM
-        }  
-      } else if ( ROMRAMSEL ) {
-        if ( !(address&ADR13)) {                                    // ROM selection if ADR13 low
-          romnum = (ctrldata & 0x07) - 1;  
-          validrom = (romnum>=0) && (romnum <MAXROMS); 
-        } else if ( !(address&ADR15)){                              // RAM bank selection if ADR15 low
-          ramblknum = (ctrldata & 0x07);                       
-        } else {
-          CTRLDATA_MODE = 0xFFFF; // Not a ROM/RAM access so disable all drivers              
-        }
-      } else {
-        CTRLDATA_MODE = 0xFFFF; // Not a ROM/RAM access so disable all drivers              
-      }
+
+    // Wait here for a transaction to start
+    while (((ctrldata=CTRLDATA_IN)&MASK) == MASK) {
+       address  = ADDR_IN;
+    } 
+    
+    if ( ROMACCESS ) {        
+      if ((address&ADR15) && valid_upperrom[romnum]) {
+        dataout = upperrom[romnum][address&0x3FFF];        
+        CTRLDATA_OUT  = ROMDIS | dataout;                              // Write new data with ROMDIS signal 
+        CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA        
+#ifdef LOWER_ROM_ENABLE
+      } else if (!(address&ADR15)) {
+        dataout = lowerrom[address&0x3FFF];        
+        CTRLDATA_OUT  = ROMDIS | dataout;                              // Write new data with ROMDIS signal 
+        CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA                  
+      }// else DATABUS and ROMDIS state held here from previous action
+#else
     }
+#endif        
+    } else if ( RAMRDACCESS ) {
+      ramblock = ramblocklut[(address>>14)&0x03][ramblknum];        
+      if ( ramblock >= 0 ) {         
+        CTRLDATA_OUT = RAMDIS | ramdata[ramblock][address&0x3FFF]; // Write new data to databus 
+        CTRLDATA_MODE = TRI_EN_DATA & TRI_EN_RAMDIS ;              // Disable WAIT_B driver, enable RAMDIS and DATA drivers
+      } // else DATABUS and RAMDIS state held here from previous action
+    } else if ( RAMWRACCESS ) {        
+      ramblock = ramblocklut[(address>>14)&0x03][ramblknum];    
+      if (ramblock>=0) {
+        ramdata[ramblock][address&0x3FFF] = ctrldata&DATA;         // Write to internal RAM
+      }  
+    } else if ( ROMRAMSEL ) {
+      if ( !(address&ADR13)) {                                    
+        // Upper ROM selection if ADR13 low
+        romnum = (ctrldata & 0x0F);  
+      } else if ( (!(address&ADR15)) && ((ctrldata&RAMBANKMASK)==RAMBANKMASK)){                              
+        // RAM bank selection if ADR15 low AND top two bits of data word are set
+        ramblknum = (ctrldata & 0x07);                       
+      } 
+    } 
+   // Don't exit 'til the control signals go inactive
+   while ((CTRLDATA_IN&MASK) != MASK) { }      
+   CTRLDATA_MODE = 0xFFFF;    
   }
 }
