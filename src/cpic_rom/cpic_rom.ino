@@ -57,6 +57,8 @@
 #define ADR15           0x2000     // so that we can identify a ROM event by just reading one port
 #define ROMDIS          0x4000
 
+#define MASK            0x0F00   // Control bit mask
+
 // Define negative TRISTATE masks: 0 = output, 1 = input
 #define TRI_EN_DATA        ~DATA
 #define TRI_EN_ROMDIS      ~ROMDIS

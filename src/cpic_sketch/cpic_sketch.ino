@@ -57,8 +57,17 @@
  *       
  */
 
+#define DEBUG            1
 
+#define CHIPKIT_ASM      1
+
+// ----- Some string processing definitions to enable use of C tokens in assembler statements
+#define str(a) st(a)    
+#define st(a) #a   
+
+#ifndef DEBUG
 #define LOWER_ROM_ENABLE 1
+#endif
 
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
@@ -95,13 +104,24 @@
 #define TEST_IN       PORTG
 #define TEST_OUT      LATG
 
+// ---- Define some Hi/Lo 16b constants to allow fast offset addressing of memory
+#ifdef CHIPKIT_ASM
+#define CTRLDATA_IN_HI 0xbf88       // Port D for use in assembler must be simple absolute value
+#define CTRLDATA_IN_LO 0x60d0   
+#define ADDR_IN_HI     0xbf88       // Port B for use in assembler must be simple absolute value
+#define ADDR_IN_LO     0x6050
+#endif
 
 // ---- Define some Test rig pins on Port G
 #define TEST2           79
 #define TEST1           78
 
 // ---- Constants and macros
+#ifdef DEBUG
+#define MAXROMS         1
+#else
 #define MAXROMS         16
+#endif
 #define ROMSIZE         16384
 #define ROMACCESS       (!(ctrldata&ROMEN_B)) 
 #define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13))  
@@ -123,17 +143,24 @@ const char upperrom[MAXROMS][ROMSIZE] = {
 };
 
 const boolean valid_upperrom[MAXROMS] = { 
-  true,  false, false, false,
+#ifdef DEBUG
+  true
+#else
+  true, false, false, false,
   false, false, false, false,
   false, false, false, false,
   false, false, false, false
+#endif
 };
 
+#ifdef LOWER_ROM_ENABLE
 // This will be the content of the AMSTRAD Firmware ROM to allow replacement
 // of a CPC464 or 664 ROM with that from a 6128.
 const char lowerrom[ROMSIZE] = {
 #include "/Users/richarde/Documents/Development/git/CPiC/src/OS_464.CSV"
 };
+#endif
+
 
 char ramdata[4][RAMBLKSIZE] ;              //  64K for D'ktronics RAM exp
 
@@ -149,7 +176,7 @@ void setup() {
   ADDR_MODE     = 0xFFFF ; // Tristate all address outputs
   CTRLDATA_OUT  = 0x0000 ; // Preset WAIT_B to zero before first assertion  
   TEST_MODE     = 0x0000 ; // Enable all test port outputs
-  TEST_OUT = 0x0000;
+  TEST_OUT      = 0x0000;
   // ADDR_MODE line above doesn't seem to put all address bits (PortB) in input mode...
   for ( int i=54 ; i<70; i++ ) {
     pinMode(i,INPUT);
@@ -157,21 +184,41 @@ void setup() {
 }
 
 void loop() {
-  int romnum = 0;    
-  int ramblknum = 1; // Should be '0' ... as above
-  int ctrldata;
-  int address;
+  int romnum = 0;  
+#ifdef DEBUG  
+  int ramblknum = 1;
+#else
+  int ramblknum = 0;
+#endif
+  register int ctrldata;
+  register int address;
   int ramblock;
   int dataout;
   
   while (true) {
-
+#ifdef CHIPKIT_ASM
+    asm volatile (  
+            ".set noreorder\n"                           // ensure assembler doesn't get optimized or put NOPS after branches etc    
+            "lui  $12, " str(CTRLDATA_IN_HI) "\n\t"  
+            "lui  $13, " str(ADDR_IN_HI) "\n\t"          
+            "li   $9, " str(MASK) "\n"          
+ "entryloop: lw   $8, " str(CTRLDATA_IN_LO) " ($12)\n\t"// sample CTRLDATA
+            "lw   $11, " str(ADDR_IN_LO) "($13)\n\t"    // sample ADDR_IN here to hide 1 clock load-to-use latency for ctrldata
+            "and  $10, $8, $9\n\t"                      // AND ctrldata with the signal mask
+            "beq  $10, $9, entryloop\n\t"               // if not active low signals then loop again
+            "add  %0, $11, $0\n\t"                      // save address to C variable (always executed in branch delay slot)      
+            "add  %1, $8, $0\n\t"                       // save ctrldata to C variable 
+        :   "+r" (address), "+r" (ctrldata)             // Outputs list
+        :                                               // No inputs
+        :   "$8", "$9", "$10", "$11", "$12", "$13"
+        );
+#else
     // Wait here for a transaction to start
     while (((ctrldata=CTRLDATA_IN)&MASK) == MASK) {
        // Always sample the address which becomes valid before the control signals go active
        address  = ADDR_IN;
     } 
-    
+#endif    
     if ( ROMACCESS ) {        
       if ((address&ADR15) && valid_upperrom[romnum]) {
         dataout = upperrom[romnum][address&0x3FFF];        
@@ -207,7 +254,24 @@ void loop() {
       } 
     } 
    // Don't exit 'til the control signals go inactive
+#ifdef CHIPKIT_ASM
+    asm volatile (                                    // ensure assembler doesn't get optimized away due to no outputs
+               ".set noreorder\n"                     // ensure assembler doesn't get optimized or put NOPS after branches etc   
+               "lui  $11, " str(CTRLDATA_IN_HI) "\n\t"   
+               "li   $9, " str(MASK) "\n"  
+     "exitloop: lw   $8, " str(CTRLDATA_IN_LO) "($11)\n\t"    // sample CTRLDATA (and no need to save in in C var)
+               "and  $8, $8, $9\n\t"                  // AND ctrldata with the signal mask 
+               "bne  $8, $9, exitloop\n\t"            // Loop again 'til outputs go active low
+               "li   $10, 0xFFFF\n\t"                 // Setup tristate mask (always executed in branch delay slot)
+               "sw   $10, " str(CTRLDATA_MODE) "\n\t" // Apply tristate mask on exit of loop
+             :                                        // no input variables
+             :                                        // no output variables
+             : "t8","$9","$10","$11"                  // Register clobber list
+          );
+#else
    while ((CTRLDATA_IN&MASK) != MASK) { }      
    CTRLDATA_MODE = 0xFFFF;    
+#endif   
+   
   }
 }
