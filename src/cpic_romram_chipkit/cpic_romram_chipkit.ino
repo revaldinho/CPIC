@@ -25,6 +25,7 @@
  * RAM expansion models a 64KBytes DKtronics unit. See 
  * http://www.cpcwiki.eu/imgs/8/83/DK%27Tronics_Peripheral_-_Technical_Manual_%28Edition_1%29.pdf
  * 
+ * 
  * Lower ROM replacement is implemented also in this code. Replacing BASIC and Firmware
  * ROMS on a 664 or 464 with those from a 6128 will effectively turn those machines into
  * a 6128 in conjunction with the 64KBytes RAM expansion.
@@ -56,18 +57,18 @@
  *                 (and so on)
  *       
  */
+#ifdef DEBUG
+#include <string.h>
+#endif
 
 #define DEBUG            1
-
 #define CHIPKIT_ASM      1
+#define LOWER_ROM_ENABLE 0
+#define RAMEXP_ENABLE    0
 
 // ----- Some string processing definitions to enable use of C tokens in assembler statements
 #define str(a) st(a)    
 #define st(a) #a   
-
-#ifndef DEBUG
-#define LOWER_ROM_ENABLE 1
-#endif
 
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
@@ -117,15 +118,16 @@
 #define TEST1           78
 
 // ---- Constants and macros
-#ifdef DEBUG
-#define MAXROMS         1
-#else
 #define MAXROMS         16
-#endif
+
+#ifdef DEBUG
+#define ROMSIZE         128
+#else
 #define ROMSIZE         16384
+#endif
+
 #define ROMACCESS       (!(ctrldata&ROMEN_B)) 
 #define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13))  
-
 #define RAMBLKSIZE      16384
 #define RAMRDACCESS     !(ctrldata&RAMRD_B)
 #define RAMWRACCESS     !(ctrldata&MREQ_B || (ctrldata&WR_B))
@@ -133,43 +135,46 @@
 #define ROMRAMSEL       !((ctrldata&IORQ_B) || (ctrldata&WR_B) )
 
 // Global variables
-const char upperrom[MAXROMS][ROMSIZE] = { 
+const char upperrom[MAXROMS*ROMSIZE] = { 
+#ifdef DEBUG
 0,0,0,0,0
-//#include "/Users/richarde/Documents/Development/git/CPiC/src/BASIC_1.0.CSV"
-//#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
+#else
+#include "/Users/richarde/Documents/Development/git/CPiC/src/BASIC_1.0.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 //#include "ROM1.csv"
 //#include "ROM2.csv"
 //#include "ROM3.csv"
+#endif
 };
 
 const boolean valid_upperrom[MAXROMS] = { 
-#ifdef DEBUG
-  true
-#else
-  true, false, false, false,
+  true, true, false, false,
   false, false, false, false,
   false, false, false, false,
   false, false, false, false
-#endif
 };
 
 #ifdef LOWER_ROM_ENABLE
 // This will be the content of the AMSTRAD Firmware ROM to allow replacement
 // of a CPC464 or 664 ROM with that from a 6128.
 const char lowerrom[ROMSIZE] = {
+#ifdef DEBUG
+0,1,2,3,4,5,6,7,8,9
+#else
 #include "/Users/richarde/Documents/Development/git/CPiC/src/OS_464.CSV"
+#endif
 };
 #endif
 
-
+#ifdef RAM_EXP_ENABLE
 char ramdata[4][RAMBLKSIZE] ;              //  64K for D'ktronics RAM exp
-
 int ramblocklut [4][8] = {                 // mapping for D'ktronics expansion RAM
   -1, 3, 3, 3, -1, -1, -1, -1,             //   -1 indicates use original CPC RAM bank
   -1,-1, 2,-1, -1, -1, -1, -1,             // 0..3 picks a 16K block from this expansion
   -1,-1, 1,-1,  0,  1,  2,  3,
   -1,-1, 0,-1, -1, -1, -1, -1,
 };
+#endif
 
 void setup() {
   CTRLDATA_MODE = 0xFFFF ; // Tristate all ctrl/data outputs
@@ -184,44 +189,60 @@ void setup() {
 }
 
 void loop() {
-  int romnum = 0;  
 #ifdef DEBUG  
-  int ramblknum = 1;
+  int rambanknum = 1;
+  boolean validrom = true;
 #else
-  int ramblknum = 0;
+  int rambanknum = 0;
+  boolean validrom = false;
 #endif
+  int romnum = 0;  
   register int ctrldata;
   register int address;
   int ramblock;
   int dataout;
+  int rom_addr_hi = 0;
   
   while (true) {
+    
 #ifdef CHIPKIT_ASM
     asm volatile (  
-            ".set noreorder\n"                           // ensure assembler doesn't get optimized or put NOPS after branches etc    
-            "lui  $12, " str(CTRLDATA_IN_HI) "\n\t"  
-            "lui  $13, " str(ADDR_IN_HI) "\n\t"          
-            "li   $9, " str(MASK) "\n"          
- "entryloop: lw   $8, " str(CTRLDATA_IN_LO) " ($12)\n\t"// sample CTRLDATA
-            "lw   $11, " str(ADDR_IN_LO) "($13)\n\t"    // sample ADDR_IN here to hide 1 clock load-to-use latency for ctrldata
-            "and  $10, $8, $9\n\t"                      // AND ctrldata with the signal mask
-            "beq  $10, $9, entryloop\n\t"               // if not active low signals then loop again
-            "add  %0, $11, $0\n\t"                      // save address to C variable (always executed in branch delay slot)      
-            "add  %1, $8, $0\n\t"                       // save ctrldata to C variable 
-        :   "+r" (address), "+r" (ctrldata)             // Outputs list
-        :                                               // No inputs
-        :   "$8", "$9", "$10", "$11", "$12", "$13"
+            ".set noreorder\n"                           // ensure assembler doesn't get optimized or put NOPS after branches etc   
+            "lui  $11, " str(CTRLDATA_IN_HI) "\n\t"  
+            "lui  $10, " str(ADDR_IN_HI) "\n\t"          
+            "li   $9, " str(MASK) "\n\t"          
+            "lw   %1, " str(CTRLDATA_IN_LO) "($11)\n"    // sample CTRLDATA directly into C register var
+                         
+  "exitloop: and  $8, %1, $9\n\t"                        // AND ctrldata with the signal mask 
+            "bne  $8, $9, exitloop\n\t"                  // Loop again 'til outputs go active low
+            "lw   %1, " str(CTRLDATA_IN_LO) "($11)\n\t"  // sample CTRLDATA again (this is actually inside the loop in the branch delay slot!)
+               
+            "li   $8, 0xFFFF\n\t"                        // Setup tristate mask 
+            "sw   $8, " str(CTRLDATA_MODE) "\n"          // Apply tristate mask on exit of loop
+
+ "entryloop: and  $8, %1, $9\n\t"                        // AND ctrldata with the signal mask
+            "beq  $8, $9, entryloop\n\t"                 // if not active low signals then loop again
+            "lw   %1, " str(CTRLDATA_IN_LO) " ($11)\n\t" // sample CTRLDATA again actually inside the loop (in branch delay slot)
+
+            "lw   %0, " str(ADDR_IN_LO) "($10)\n\t"      // sample ADDR_IN 
+        :   "=r" (address), "=r" (ctrldata)              // Outputs list (C variables in registers)
+        :                                                // No inputs
+        :   "$8", "$9", "$10", "$11"                     // Register clobber list
         );
 #else
-    // Wait here for a transaction to start
+    // exit loop: Wait here until all signals go inactive
+    while ((CTRLDATA_IN&MASK) != MASK) { }      
+    CTRLDATA_MODE = 0xFFFF;    
+    // entry loop: Wait here for a transaction to start
     while (((ctrldata=CTRLDATA_IN)&MASK) == MASK) {
        // Always sample the address which becomes valid before the control signals go active
        address  = ADDR_IN;
     } 
 #endif    
+
     if ( ROMACCESS ) {        
-      if ((address&ADR15) && valid_upperrom[romnum]) {
-        dataout = upperrom[romnum][address&0x3FFF];        
+      if ((address&ADR15) && validrom) {
+        dataout = upperrom[rom_addr_hi|(address&0x3FFF)];      
         CTRLDATA_OUT  = ROMDIS | dataout;                              // Write new data with ROMDIS signal 
         CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA        
 #ifdef LOWER_ROM_ENABLE
@@ -233,45 +254,32 @@ void loop() {
 #else
     }
 #endif        
+
+#ifdef RAM_EXP_ENABLE
     } else if ( RAMRDACCESS ) {
-      ramblock = ramblocklut[(address>>14)&0x03][ramblknum];        
+      ramblock = ramblocklut[(address>>14)&0x03][rambanknum];        
       if ( ramblock >= 0 ) {         
         CTRLDATA_OUT = RAMDIS | ramdata[ramblock][address&0x3FFF]; // Write new data to databus 
         CTRLDATA_MODE = TRI_EN_DATA & TRI_EN_RAMDIS ;              // Disable WAIT_B driver, enable RAMDIS and DATA drivers
       } // else DATABUS and RAMDIS state held here from previous action
     } else if ( RAMWRACCESS ) {        
-      ramblock = ramblocklut[(address>>14)&0x03][ramblknum];    
+      ramblock = ramblocklut[(address>>14)&0x03][rambanknum];    
       if (ramblock>=0) {
         ramdata[ramblock][address&0x3FFF] = ctrldata&DATA;         // Write to internal RAM
-      }  
+      }       
+#endif     
     } else if ( ROMRAMSEL ) {
       if ( !(address&ADR13)) {                                    
         // Upper ROM selection if ADR13 low
         romnum = (ctrldata & 0x0F);  
+        rom_addr_hi = romnum <<14;
+        validrom = valid_upperrom[romnum];        
+#ifdef RAM_EXP_ENABLE
       } else if ( (!(address&ADR15)) && ((ctrldata&RAMBANKMASK)==RAMBANKMASK)){                              
         // RAM bank selection if ADR15 low AND top two bits of data word are set
-        ramblknum = (ctrldata & 0x07);                       
+        rambanknum = (ctrldata & 0x07); 
+#endif                      
       } 
     } 
-   // Don't exit 'til the control signals go inactive
-#ifdef CHIPKIT_ASM
-    asm volatile (                                    // ensure assembler doesn't get optimized away due to no outputs
-               ".set noreorder\n"                     // ensure assembler doesn't get optimized or put NOPS after branches etc   
-               "lui  $11, " str(CTRLDATA_IN_HI) "\n\t"   
-               "li   $9, " str(MASK) "\n"  
-     "exitloop: lw   $8, " str(CTRLDATA_IN_LO) "($11)\n\t"    // sample CTRLDATA (and no need to save in in C var)
-               "and  $8, $8, $9\n\t"                  // AND ctrldata with the signal mask 
-               "bne  $8, $9, exitloop\n\t"            // Loop again 'til outputs go active low
-               "li   $10, 0xFFFF\n\t"                 // Setup tristate mask (always executed in branch delay slot)
-               "sw   $10, " str(CTRLDATA_MODE) "\n\t" // Apply tristate mask on exit of loop
-             :                                        // no input variables
-             :                                        // no output variables
-             : "t8","$9","$10","$11"                  // Register clobber list
-          );
-#else
-   while ((CTRLDATA_IN&MASK) != MASK) { }      
-   CTRLDATA_MODE = 0xFFFF;    
-#endif   
-   
   }
 }

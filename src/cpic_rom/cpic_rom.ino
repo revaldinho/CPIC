@@ -46,18 +46,23 @@
  *       
  */
 
-#define BREADBOARDTEST   1
+#define DEBUG           1
 // ---- Define positive bit masks for ctrl + data word
 #define DATA            0x00FF
 #define ROMEN_B         0x0100
 #define IORQ_B          0x0200
 #define MREQ_B          0x0400
 #define WR_B            0x0800
-#define ADR13           0x1000     // ROM only version connects A13,15 also to ctrldata word 
-#define ADR15           0x2000     // so that we can identify a ROM event by just reading one port
-#define ROMDIS          0x4000
+#define RAMRD_B         0x1000  // unused for ROM only
+#define WAIT_B          0x2000  // unused for ROM only
+#define ROMDIS          0x4000  
+#define RAMDIS          0x4000  // unused for ROM only
 
 #define MASK            0x0F00   // Control bit mask
+
+// ---- Bit masks for address word
+#define ADR13           0x2000
+#define ADR15           0x8000
 
 // Define negative TRISTATE masks: 0 = output, 1 = input
 #define TRI_EN_DATA        ~DATA
@@ -79,22 +84,41 @@
 #define TEST1           78
 
 // ---- Constants and macros
-#define MAXROMS         1
+#define MAXROMS         16
+
+#ifdef DEBUG
+#define ROMSIZE         128
+#else
 #define ROMSIZE         16384
-#define ROMACCESS       (!(ctrldata&ROMEN_B)) && (ctrldata&ADR15)
-#define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (ctrldata&ADR13))  
+#endif
+
+#define ROMACCESS       (!(ctrldata&ROMEN_B)) 
+#define ROMSEL          !((ctrldata&IORQ_B) || (ctrldata&WR_B) || (address&ADR13))  
 
 // ---- Global variables
 
 // ROM data will be accessed directly from Flash. Each csv file should have exactly 
 // 16384 entries to have one map to each ROM here.
-const char romdata[MAXROMS][ROMSIZE] = { 
+// Global variables
+const char romdata[MAXROMS*ROMSIZE] = { 
+#ifdef DEBUG
+0,0,0,0,0
+#else
+#include "/Users/richarde/Documents/Development/git/CPiC/src/BASIC_1.0.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 //#include "ROM1.csv"
 //#include "ROM2.csv"
 //#include "ROM3.csv"
+#endif
 };
-    
+
+const boolean valid_upperrom[MAXROMS] = { 
+  true, true, false, false,
+  false, false, false, false,
+  false, false, false, false,
+  false, false, false, false
+};
+
 void setup() {
   CTRLDATA_MODE = 0xFFFF ; // Tristate all ctrl outputs
   ADDR_MODE     = 0xFFFF ; // Tristate all address outputs
@@ -108,26 +132,27 @@ void setup() {
 void loop() {
   int ctrldata;
   int address;
-  
-#ifdef BREADBOARDTEST
   int romnum = 1;            
+  int rom_addr_hi = 0;
+
+#ifdef DEBUG
   boolean validrom = true;
 #else
-  int romnum = 0;            
   boolean validrom = false;
 #endif
   
   while ( true ) {
     ctrldata = CTRLDATA_IN; 
+    address  = ADDR_IN;                                  
     if ( ROMACCESS ) {
-      address  = ADDR_IN;                                  
       if (validrom) {
-        CTRLDATA_OUT  = ROMDIS | romdata[romnum][address&0x3FFF];      // Write new data with ROMDIS signal 
+        CTRLDATA_OUT  = ROMDIS | romdata[rom_addr_hi | (address&0x3FFF)];      // Write new data with ROMDIS signal 
         CTRLDATA_MODE = TRI_EN_ROMDIS & TRI_EN_DATA;                   // Enable ROMDIS and DATA 
       }
     } else if ( ROMSEL ) {
-      romnum = (ctrldata & 0x07) - 1;  
-      validrom = (romnum>=0) && (romnum <MAXROMS); 
+      romnum = (ctrldata & 0x0F);  
+      rom_addr_hi = romnum <<14;
+      validrom = valid_upperrom[romnum];  
     } else {
       CTRLDATA_MODE = 0xFFFF; // Not a ROM access so disable all drivers
     }
