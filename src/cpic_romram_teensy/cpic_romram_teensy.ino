@@ -216,7 +216,7 @@ void loop() {
 "loop2:  ldr     %[ctrladrhi], [r4]\n\t"               // NB 1 cycle load-before-use penalty here
         "ldr     %[address], [r5]\n\t"                 // .. so sample address low bits to make use of the latency
         "and     r6, %[ctrladrhi], #" str(MASK) "\n\t"
-        "teqs    r6, #" str(MASK) "\n\t"
+        "teq     r6, #" str(MASK) "\n\t"
         "beq     loop2\n\t"
 
         "lsr     r5, %[ctrladrhi], #16\n\t"             // Extract addr hi bits and save in byte 1 of r5
