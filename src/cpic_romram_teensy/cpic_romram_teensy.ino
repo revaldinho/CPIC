@@ -57,6 +57,28 @@
    ROM is accessed whenever ROMEN_B goes low. Addresses with Address[15] set go to upper (foreground)
    ROMs and those with Address[15] low go to lower ROM.
 
+ Per-pin control notes
+ ---------------------
+ 
+ val = 0b0000_0000_0000_0000_0000_0001_0100_0100;
+                                   ---  -    -
+                                    \    \    \_ Slew rate enable: 1=Fast, 0=Slow 
+                                     \    \_____ Drive strength  : 1=High, 0=Low
+                                      \_________ Pin control     : 001 = GPIO
+
+ // Set ROMDIS/RAMDIS to have fast slew + high drive
+ PORTB_PCR8 = 0x00000144;
+ PORTB_PCR9 = 0x00000144;
+
+ OR can use the PORTX_GPCLR to set bits globally for an entire port, ie
+
+ PORTB_GPCLR = 0x0144FFFF;
+
+ ...picks bits from lower 16 bits and writes to selected bits[15:0] identified in the upper 16bit field.
+
+ e.g. set all bits in a port to GPIO control and default to slow slew, low drive
+
+ PORTB_GPCLR = 0x01440100 ;
 */
 #ifdef DEBUG
 #include <string.h>
@@ -75,9 +97,17 @@
 // Data direction is the opposite of ChipKit - on Teensy 0=input, 1=Output
 
 // Some absolute addresses for the assembler code
+
+#define GPIO_BASE         0x400FF000
+#define GPIOB_PDIR_OFFSET  0x50
+#define GPIOD_PDIR_OFFSET  0xD0
+#define GPIOC_PDDR_OFFSET  0x94
+#define GPIOC_PDOR_OFFSET  0x80
+
 #define GPIOB_PDIR_ADDR 0x400FF050
 #define GPIOD_PDIR_ADDR 0x400FF0D0
 #define GPIOC_PDDR_ADDR 0x400FF094
+#define GPIOC_PDOR_ADDR 0x400FF080
 
 // Arduino defined tokens (including unit32_t*) casts for C
 #define  CTRLADRHI_IN   GPIOB_PDIR
@@ -179,6 +209,8 @@ void setup() {
   for (int i = 0 ; i < 58 ; i++ ) {
     pinMode(i, INPUT);
   }
+  //PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
+  //PORTC_PCR9 = 0x0144; // as above for RAMDIS
 }
 
 void loop() {
@@ -200,44 +232,34 @@ void loop() {
 
 #ifdef TEENSY_ASM
     asm volatile (
-        "ldr     r4, =" str(GPIOB_PDIR_ADDR) "\n\t"     // ctrl/high address port
-        "ldr     r5, =" str(GPIOD_PDIR_ADDR) "\n\t"     // Address low byte port
-        "ldr     r7, =" str(GPIOC_PDDR_ADDR) "\n"       // data/ctrl output direction
+        "ldr     r9, =" str(GPIO_BASE) "\n"                                                                                       
+        // Exit loop - wait for all ctrl to go inactive            
+"loop1:  ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t"                            
+        "and     r7, %[ctrladrhi], #" str(MASK) "\n\t"                // Mask off control bits 
+        "subs    r7, r7, #" str(MASK) "\n\t"                          // subtract mask from r7 - r7 will be all-zeroes on exit
+        "bne     loop1\n\t"                                        
 
-        // Exit loop - wait for all ctrl to go inactive
-"loop1:  ldr     %[ctrladrhi], [r4]\n\t"                // NB 1 cycle load-before-use penalty here
-        "movw    r8, #0\n\t"                            // ... so repeatedly load const into r8 for use later in delay slot
-        "and     r6, %[ctrladrhi], #" str(MASK) "\n\t"  // Mask off control bits
-        "cmp     r6, #" str(MASK) "\n\t"
-        "bne     loop1\n\t"
-        "str     r8,[r7]\n\t"                           // tristate the data and ctrl outputs
-        
+        "str     r7,[r9, #"  str(GPIOC_PDDR_OFFSET) "]\n"             // tristate the data and ctrl outputs by writing the all-zeroes from r7
+      
         // Entry loop - wait for one active low signal to go active
-"loop2:  ldr     %[ctrladrhi], [r4]\n\t"               // NB 1 cycle load-before-use penalty here
-        "ldr     %[address], [r5]\n\t"                 // .. so sample address low bits to make use of the latency
-        "and     r6, %[ctrladrhi], #" str(MASK) "\n\t"
-        "teq     r6, #" str(MASK) "\n\t"
-        "beq     loop2\n\t"
-
-        "lsr     r5, %[ctrladrhi], #16\n\t"             // Extract addr hi bits and save in byte 1 of r5
-        "and     r5, r5, #0xFF00\n\t"                   // Isolate high order bits
-        "and     %[address], %[address], #0x00FF\n\t"   // Clear all other bits in low order byte
-        "orr     %[address], %[address], r5\n\t"        // Merge low and high bits of address into one in %[address]
-        :   [address] "=r" (address), [ctrladrhi] "=r" (ctrladrhi)               // Outputs list (C variables in registers)
-        :                                               // No inputs
-        :   "r4", "r5", "r6", "r7", "r8"                // Register clobber list
+"loop2:  ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t" // NB 1 cycle load-before-use penalty here for first use
+        "and     r7, %[ctrladrhi], #" str(MASK) "\n\t"              
+        "teq     r7, #" str(MASK) "\n\t"                            
+        "beq     loop2\n\t"  
+        :   [ctrladrhi] "=r" (ctrladrhi)                              // Outputs list (C variables in registers)
+        :                                                             // No inputs
+        :   "r7", "r9"                                                // Register clobber list
       );
 #else
     while ( ((ctrladrhi = CTRLADRHI_IN)&MASK) != MASK ) {} // Wait for control signals to go inactive
-    DATACTRL_OUT = 0x0;                                  // actively deassert ROMDIS/RAMDIS before..
     DATACTRL_MODE = 0x0;                                 // tristating all data and control outputs
     while ( ((ctrladrhi = CTRLADRHI_IN)&MASK) == MASK ) {} // Now wait for control signals to become active
-    address = ADDRESS_IN;
 #endif
 
 
 #ifdef RAM_EXP_ENABLE
     if ( RAMRD ) {
+      address = ADDRESS_IN;
       if ( ram_lut_col > -1 ) {
         ram_lut_row = (address & 0xC000) >> 14;
         ramblock = ramblocklut[ram_lut_row][ram_lut_col];
@@ -249,15 +271,18 @@ void loop() {
     } else
 #endif
       if ( HIROMRD && validrom ) {
+        address = ADDRESS_IN;
         DATACTRL_OUT = upperrom[(romnum << 14) | (address & 0x3FFF)] | ROMDIS;
         DATACTRL_MODE = DATA | ROMDIS;
 #ifdef LOWER_ROM_ENABLE
       } else if ( LOROMRD ) {
+        address = ADDRESS_IN;
         DATACTRL_OUT = lowerrom[address & 0x3FFF] | ROMDIS;
         DATACTRL_MODE = DATA | ROMDIS;
 #endif
 #ifdef RAM_EXP_ENABLE
       } else if ( RAMWR ) {
+        address = ADDRESS_IN;
         if ( ram_lut_col > -1 ) {
           datain  = DATACTRL_IN & DATA;
           ram_lut_row = (address & 0xC000) >> 14                 ;
