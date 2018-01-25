@@ -88,6 +88,9 @@
 //#define TEENSY_ASM       1
 #define LOWER_ROM_ENABLE 1
 #define RAM_EXP_ENABLE   1
+//#define USE_ROM_PTR      1
+
+#define PCR_SETUP  0x00144  // 0x144 = HIGH DRIVE+SLEW ; 0x104 = HIGH SLEW ; 0x140 = HIGH DRIVE
 
 // ----- Some string processing definitions to enable use of C tokens in assembler statements
 #define str(a) st(a)
@@ -122,7 +125,6 @@
 #define DATA            0x00FF
 #define ROMDIS          0x0100
 #define RAMDIS          0x0200
-// #define WAIT_B          0x0400
 
 #define MREQ_B          0x00000001
 #define IOREQ_B         0x00000002
@@ -162,7 +164,7 @@
 #define RAMWR           (!(ctrladrhi&(MREQ_B|WR_B)))
 
 // Global variables
-const char upperrom[MAXROMS * ROMSIZE] = {
+const char upperrom[MAXROMS][ROMSIZE] = {
 #ifdef DEBUG
   0, 0, 0, 0, 0
 #else
@@ -180,6 +182,10 @@ const boolean valid_upperrom[MAXROMS] = {
   false, false, false, false,
   false, false, false, false
 };
+
+#ifdef USE_ROM_PTR
+  char *romptr[MAXROMS];
+#endif
 
 #ifdef LOWER_ROM_ENABLE
 // This will be the content of the AMSTRAD Firmware ROM to allow replacement
@@ -209,8 +215,8 @@ void setup() {
   for (int i = 0 ; i < 58 ; i++ ) {
     pinMode(i, INPUT);
   }
-  //PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
-  //PORTC_PCR9 = 0x0144; // as above for RAMDIS
+  //PORTC_PCR8 = PCR_SETUP ; // switch on GPIO control for ROMDIS
+  //PORTC_PCR9 = PCR_SETUP ; // as above for RAMDIS
 }
 
 void loop() {
@@ -227,8 +233,8 @@ void loop() {
   int ramblock;
   int datain;
   int ram_lut_row = 0;
-  while (true) {
 
+  while (true) {
 
 #ifdef TEENSY_ASM
     asm volatile (
@@ -238,7 +244,7 @@ void loop() {
         "and     r7, %[ctrladrhi], #" str(MASK) "\n\t"                // Mask off control bits 
         "subs    r7, r7, #" str(MASK) "\n\t"                          // subtract mask from r7 - r7 will be all-zeroes on exit
         "bne     loop1\n\t"                                        
-
+        "str     r7,[r9, #"  str(GPIOC_PDOR_OFFSET) "]\n"             // drive outputs low before tristating (Ie don't rely on pulldown for edge)
         "str     r7,[r9, #"  str(GPIOC_PDDR_OFFSET) "]\n"             // tristate the data and ctrl outputs by writing the all-zeroes from r7
       
         // Entry loop - wait for one active low signal to go active
@@ -252,7 +258,11 @@ void loop() {
       );
 #else
     while ( ((ctrladrhi = CTRLADRHI_IN)&MASK) != MASK ) {} // Wait for control signals to go inactive
-    DATACTRL_MODE = 0x0;                                 // tristating all data and control outputs
+#ifdef DEBUG
+    DATACTRL_OUT = 0x0;                                    // Show when line would go low and data tristate cleanly
+#else
+    DATACTRL_MODE = 0x0;                                   // tristating all data and control outputs
+#endif
     while ( ((ctrladrhi = CTRLADRHI_IN)&MASK) == MASK ) {} // Now wait for control signals to become active
 #endif
 
@@ -272,7 +282,11 @@ void loop() {
 #endif
       if ( HIROMRD && validrom ) {
         address = ADDRESS_IN;
-        DATACTRL_OUT = upperrom[(romnum << 14) | (address & 0x3FFF)] | ROMDIS;
+#ifdef USE_ROM_PTR
+        DATACTRL_OUT = (*(romptr+(address & 0x3FFF))) | ROMDIS;
+#else
+        DATACTRL_OUT = upperrom[romnum][(address & 0x3FFF)] | ROMDIS;
+#endif
         DATACTRL_MODE = DATA | ROMDIS;
 #ifdef LOWER_ROM_ENABLE
       } else if ( LOROMRD ) {
@@ -298,6 +312,9 @@ void loop() {
         datain  = DATACTRL_IN & DATA;
         romnum = ((datain & 0xF)) ;   // only allow 16 ROMS
         validrom = valid_upperrom[romnum];
+#ifdef USE_ROM_PTR        
+        romptr = (char *)upperrom[romnum];
+#endif
       }
 #ifdef RAM_EXP_ENABLE
       else if ( RAMSEL ) {
