@@ -298,13 +298,6 @@ void loop() {
   char *romptr = (char *) upperrom[0];
   char romdata;
   while (true) {
-    while ( ((ctrladrhi = CTRLADRHI_IN)&RD_B) != RD_B ) {}                                         // Tristate databus as soon as RD_B is high 
-#ifdef DEBUG    
-    DATACTRL_OUT  = 0x0000;                                                                        // Drive ROM/RAMDIS and data signals low to observe time cleanly
-#else
-    DATACTRL_MODE &= ~DATA;                                                                        // tristating all data signals only normally on RD_B deassertion
-#endif
-
 #ifdef TEENSY_ASM
    asm volatile (
 
@@ -337,9 +330,9 @@ void loop() {
 
         "ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t" // Resample address bits again in case triggered by M1_B
         "ldrb    %[adrortmp], [r9, #" str(GPIOD_PDIR_OFFSET) "]\n\t"  // sample adr low byte only
-        "and     %[adrortmp], %[adrortmp], #0x00FF\n\t"               // clear all other bits (remember we used this reg as a temp var above)
+        "uxtb    %[adrortmp], %[adrortmp]\n\t"                        // clear all upper bits (remember we used this reg as a temp var above)
         "lsr     %[ctrladrhi], %[ctrladrhi], #8\n\t"                  // Move high addr bits into correct location
-        "and     %[ctrladrhi], %[ctrladrhi], #0x00FF00\n\t"            // mask off high address bits 
+        "and     %[ctrladrhi], %[ctrladrhi], #0x00FF00\n\t"           // mask off high address bits 
         "orr     %[adrortmp], %[adrortmp], %[ctrladrhi]\n\t"          // Or high and low together
 
                                                                       // speculatively prefetch ROM data from slow flash memory before resampling control signals
@@ -370,7 +363,7 @@ void loop() {
 #endif
     // Wait for all control signals to go inactive (for read and write), tristating all data and control outputs 
     // incl. ROM/RAM disables. Now wait for any control signals to become active - M1 trigger most critical
-    while (((ctrladrhi = CTRLADRHI_IN)&MASK)    != MASK ) {}                                     
+    while ((ctrladrhi&MASK)    != MASK ) { ctrladrhi = CTRLADRHI_IN ; }                                     
     DATACTRL_MODE = 0x0;                                                                             
     while ( ((ctrladrhi = CTRLADRHI_IN)&MASK) == MASK ) {}                                           
     // Assume M1 trigger, so fetch address (again) in case M1 valid before address (see timing above) and then prefetch 
