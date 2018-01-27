@@ -126,11 +126,7 @@
   IO Read time: IOREQ* (T1) -> clock rise (T5)  
   
                 = (250-125-75) + 250 + 250 + (250-30) = 770ns
-  
-  
-  => Need to sample M1 for instruction cycle, and then address and then all control signals again to
-     to get valid settings for RAMRD*, ROMEN* etc   
-  
+
   while ((ctrladr=PORTX & MASK) == MASK ) {}
   get address_hi                          // ~7 instr after sample here = 58ns later but address already valid
   compute address = f(ctrladr,address_hi)
@@ -198,6 +194,7 @@
 #define ROMEN_B           0x00000010
 #define M1_B              0x00000020 // Port B5 
 #define RD_B              0x00000400 // Port B10 (because 6-9 not available)  
+#define CLK4              0x00000800
 #define MASK              0x0000003F // All above control signals inactive (but ignore RD_B in aggregate)
 
 #define ADDR_HI           0x00FF0000  // bits 16-23 on control input data
@@ -279,8 +276,8 @@ void setup() {
   for (int i = 0 ; i < 58 ; i++ ) {
     pinMode(i, INPUT);
   }
-  //PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
-  //PORTC_PCR9 = 0x0144; // as above for RAMDIS
+  PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
+  PORTC_PCR9 = 0x0144; // as above for RAMDIS
 }
 
 void loop() {
@@ -304,11 +301,10 @@ void loop() {
         // NB using %[adrortmp] register (ie C address variable) as a temp variable in the upper portion of the code to save clobbering
         // more registers. This will be hold a valid address on exit from the assembly code.
 
-        "ldr     r9, =" str(GPIO_BASE) "\n\t"                         // Tristate loop - tristate databus as soon as rd_b goes high 
-        "ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n"   // Sample control signals                           
-"loop0:  ands    %[adrortmp], %[ctrladrhi], #" str(RD_B) "\n\t"       // Check READ bit only to see if we can tristate databus (which will be earlier than ROMEN_B and other derived signals)
-        "ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t" // resample control signals - mask latency if looping, and use for next loop
-        "beq     loop0\n\t"                                           // Loop again if not set (ie AND result is zero)
+        "ldr     r9, =" str(GPIO_BASE) "\n"                           // Tristate loop - tristate databus as soon as rd_b goes high  
+"loop0:  ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n"   // Sample control signals                           
+        "lsls    %[adrortmp], %[ctrladrhi], #21\n\t"                  // Check READ bit only  by shifting 21 places into MSB to see if we can tristate databus (which will be earlier than ROMEN_B and other derived signals)
+        "bpl.n   loop0\n\t"                                           // Loop again if rd_b is zero
                                                                          
 #ifdef DEBUG                                                             
         "str     %[adrortmp],[r9, #"  str(GPIOC_PDOR_OFFSET) "]\n"    // zero ROMDIS/RAMDIS for easy observation in debug mode
@@ -322,36 +318,33 @@ void loop() {
         "bne     loop1\n\t"                                            
         "str     %[adrortmp],[r9, #"  str(GPIOC_PDDR_OFFSET) "]\n"    // tristate the data and ctrl outputs by writing the all-zeroes from %[adrortmp]      
         
-                                                                      // Entry Loop - wait for any control signals to go active low
-"loop2:  ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t" // Sample control bits
-        "and     %[adrortmp], %[ctrladrhi], #" str(MASK) "\n\t"       // Mask off control bits
-        "teq     %[adrortmp], #" str(MASK) "\n\t"                     // Check if any active low
-        "beq     loop2\n\t"                                           // If not then loop again
-
-        "ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t" // Resample address bits again in case triggered by M1_B
+                                                                      // Entry Loop - wait for clock to go low
+"loop2:  ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t" // Sample control bits and address high byte
         "ldrb    %[adrortmp], [r9, #" str(GPIOD_PDIR_OFFSET) "]\n\t"  // sample adr low byte only
-        "uxtb    %[adrortmp], %[adrortmp]\n\t"                        // clear all upper bits (remember we used this reg as a temp var above)
-        "lsr     %[ctrladrhi], %[ctrladrhi], #8\n\t"                  // Move high addr bits into correct location
-        "and     %[ctrladrhi], %[ctrladrhi], #0x00FF00\n\t"           // mask off high address bits 
-        "orr     %[adrortmp], %[adrortmp], %[ctrladrhi]\n\t"          // Or high and low together
+        "lsls    r10, %[ctrladrhi], #20\n\t"                          // check clock by shifting 20 places into MSB
+        "bmi.n   loop2\n\t"                                           // If not zero then loop again
+
+        "uxtb    %[adrortmp], %[adrortmp]\n\t"                        // clear all upper bits  of low byte (remember we used this reg as a temp var above)
+        "ubfx    %[ctrladrhi], %[ctrladrhi], #16,#8\n\t"              // isolate the 8 high order address bits 
+        "orr     %[adrortmp], %[adrortmp], %[ctrladrhi], lsr #8 \n\t" // Or high and low together simultaneously moving the high bits into place
 
                                                                       // speculatively prefetch ROM data from slow flash memory before resampling control signals
-        "bic      %[ctrladrhi], %[adrortmp], #0xC000\n\t"             // Get 16K addr offset by clearing top two bits and using ctrladrhi as a temp because we are about to resample in a few instr time below
+        "ubfx    %[ctrladrhi], %[adrortmp], #0,#14\n\t"               // Get 16K addr offset by clearing top two bits and using ctrladrhi as a temp because we are about to resample in a few instr time below
 #ifdef LOWER_ROM_ENABLE
         "tst      %[adrortmp], #0x8000\n\t"                           // Check full address MSB to see if we are in upper or lower ROM
-        "ldrbeq   %[romdata], [%[romptr], %[ctrladrhi]]\n\t"         // Read a byte from upper ROM if full address MSB is set
-        "ldrbne   %[romdata], [%[lowerrom], %[ctrladrhi]]\n\t"       // Read a byte from lower ROM if full address MSB is not set
+        "ldrbeq   %[romdata], [%[romptr], %[ctrladrhi]]\n\t"          // Read a byte from upper ROM if full address MSB is set
+        "ldrbne   %[romdata], [%[lowerrom], %[ctrladrhi]]\n\t"        // Read a byte from lower ROM if full address MSB is not set
 #else
         "ldrb     %[romdata], [%[romptr], +%[ctrladrhi]]\n\t"         // Read a byte from upper ROM
 #endif
-        "ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t" // Finally, resample ctrl bits again, assuming they are valid by this point if an early M1 was the original trigger
+        "ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n\t" // Finally, resample ctrl bits again, assuming they are valid by this point (latest ~ 100ns after clock falling edge)
         :   [ctrladrhi] "=r" (ctrladrhi), [adrortmp] "=r" (address), [romdata] "=r" (romdata)  // Outputs list (C variables in registers)
 #ifdef LOWER_ROM_ENABLE
         :   [romptr] "r" (romptr), [lowerrom] "r" (lowerrom)                                   // Inputs list
 #else
         :   [romptr] "r" (romptr)                                                              // Inputs list
 #endif
-        :   "r9"                                                                               // Register clobber list
+        :   "r9", "r10"                                                                        // Register clobber list
       );
 #else
     // Tristate databus as soon as the RD_B signal goes high. 
@@ -362,15 +355,12 @@ void loop() {
     DATACTRL_MODE &= ~DATA;  // tristate DATA bits only normally 
 #endif
     // Wait for all control signals to go inactive (for read and write), tristating all data and control outputs 
-    // incl. ROM/RAM disables. Now wait for any control signals to become active - M1 trigger most critical
+    // incl. ROM/RAM disables.
     while ((ctrladrhi&MASK)    != MASK ) { ctrladrhi = CTRLADRHI_IN ; }                                     
     DATACTRL_MODE = 0x0;                                                                             
-    while ( ((ctrladrhi = CTRLADRHI_IN)&MASK) == MASK ) {}                                           
-    // Assume M1 trigger, so fetch address (again) in case M1 valid before address (see timing above) and then prefetch 
-    // ROM data (which may be invalid) as flash has longest latency and resample control signals at least 120ns after an 
-    // M1 trigger. Don't care about the delay if it was any other trigger as all non-fetch RAM cycles have an extra 250ns 
-    // clock tick and IO cycles have two extra ticks.
-    address = (((CTRLADRHI_IN>>8)&0xFF00)|((ADR_LO_IN)&0xFF)) ;
+    // Wait on falling edge of clock when address wll be valid and control signals will become valid shortly
+    while ( (ctrladrhi = CTRLADRHI_IN)&CLK4 ) {}                                           
+    address = (((ctrladrhi>>8)&0xFF00)|((ADR_LO_IN)&0xFF)) ;
 #ifdef LOWER_ROM_ENABLE    
     romdata = (address & 0x8000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
 #else
