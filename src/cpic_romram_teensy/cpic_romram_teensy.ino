@@ -152,9 +152,9 @@
 #define str(a) st(a)
 #define st(a) #a
 
-#define DEBUG            1
+//#define DEBUG            1
 //#define TEENSY_ASM       1
-#define LOWER_ROM_ENABLE 1
+//#define LOWER_ROM_ENABLE 1
 //#define RAM_EXP_ENABLE   1
 
 // --- Port allocations
@@ -195,11 +195,12 @@
 #define M1_B              0x00000020 // Port B5 
 #define RD_B              0x00000400 // Port B10 (because 6-9 not available)  
 #define CLK4              0x00000800
-#define MASK              0x0000003F // All above control signals inactive (but ignore RD_B in aggregate)
+#define MASK              0x0000001F // All above control signals inactive (but ignore RD_B in aggregate)
 
 #define ADDR_HI           0x00FF0000  // bits 16-23 on control input data
 #define ADDR_LO           0x000000FF  // bits  0-7 on address input
 #define ADR_13_RAW        0x00200000  // bit 13 in raw position in ctrl/adr word - ie bit 21
+#define ADR_14_RAW        0x00400000  // bit 14 in raw position in ctrl/adr word - ie bit 22
 #define ADR_15_RAW        0x00800000  // bit 15 in raw position in ctrl/adr word - ie bit 23
 
 #define VALIDRAMSELMASK   0x000000C0  // Top two bits of Data must be set for a valid RAM selection
@@ -218,13 +219,12 @@
 
 #define ROMSEL            (!(ctrladrhi&(IOREQ_B|ADR_13_RAW|WR_B)))
 #define RAMSEL            (!(ctrladrhi&(IOREQ_B|ADR_15_RAW|WR_B)))
-#define HIROMRD           ((!(ctrladrhi&(ROMEN_B)))&&(ctrladrhi&ADR_15_RAW))
+#define HIROMRD           ((ctrladrhi&(ROMEN_B|ADR_14_RAW))==(ADR_14_RAW))
 #ifdef  LOWER_ROM_ENABLE
-#define LOROMRD           (!(ctrladrhi&(ROMEN_B|ADR_15_RAW)))
+#define LOROMRD           (!(ctrladrhi&(ROMEN_B|ADR_14_RAW)))
 #else
 #define LOROMRD         false
 #endif
-#define ROMRD             (!(ctrladrhi&(ROMEN_B)))
 #define RAMRD             (!(ctrladrhi&(RAMRD_B)))
 #define RAMWR             (!(ctrladrhi&(MREQ_B|WR_B)))
 
@@ -234,15 +234,16 @@ const char upperrom[MAXROMS][ROMSIZE] = {
   0, 0, 0, 0, 0
 #else
 #include "/Users/richarde/Documents/Development/git/CPiC/src/BASIC_1.0.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOPIA.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
-  //#include "ROM1.csv"
-  //#include "ROM2.csv"
-  //#include "ROM3.csv"
 #endif
 };
 
 const boolean valid_upperrom[MAXROMS] = {
-  true, true, false, false,
+  false, false , true, false,
   false, false, false, false,
   false, false, false, false,
   false, false, false, false
@@ -251,7 +252,7 @@ const boolean valid_upperrom[MAXROMS] = {
 #ifdef LOWER_ROM_ENABLE
 // This will be the content of the AMSTRAD Firmware ROM to allow replacement
 // of a CPC464 or 664 ROM with that from a 6128.
-const char lowerrom[ROMSIZE] = {
+const char lowerrom[] = {
 #ifdef DEBUG
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 #else
@@ -276,8 +277,17 @@ void setup() {
   for (int i = 0 ; i < 58 ; i++ ) {
     pinMode(i, INPUT);
   }
-  PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
-  PORTC_PCR9 = 0x0144; // as above for RAMDIS
+
+  //PORTC_PCR0 = 0x0144;
+  //PORTC_PCR1 = 0x0144;
+  //PORTC_PCR2 = 0x0144;
+  //PORTC_PCR3 = 0x0144;
+  //PORTC_PCR4 = 0x0144;
+  //PORTC_PCR5 = 0x0144;
+  //PORTC_PCR6 = 0x0144;
+  //PORTC_PCR7 = 0x0144;
+  //PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
+  //PORTC_PCR9 = 0x0144; // as above for RAMDIS
 }
 
 void loop() {
@@ -291,9 +301,13 @@ void loop() {
   int romnum = 0;
   register int ctrladrhi;       // register for use with assembler code
   register int address;         // register for use with assembler code
+#ifdef DEBUG
+  char *romptr = (char *)upperrom[0];
+#else
+  char *romptr = NULL;
+#endif  
+  char romdata; 
 
-  char *romptr = (char *) upperrom[0];
-  char romdata;
   while (true) {
 #ifdef TEENSY_ASM
    asm volatile (
@@ -347,34 +361,35 @@ void loop() {
         :   "r9", "r10"                                                                        // Register clobber list
       );
 #else
-    // Tristate databus as soon as the RD_B signal goes high. 
-    while ( ((ctrladrhi = CTRLADRHI_IN)&RD_B) != RD_B ) {}
-#ifdef DEBUG
-    DATACTRL_OUT = 0x0;      // Drive ROMDIS/RAMDIS low for clean timing observation on scope
-#else
-    DATACTRL_MODE &= ~DATA;  // tristate DATA bits only normally 
-#endif
-    // Wait for all control signals to go inactive (for read and write), tristating all data and control outputs 
-    // incl. ROM/RAM disables.
-    while ((ctrladrhi&MASK)    != MASK ) { ctrladrhi = CTRLADRHI_IN ; }                                     
-    DATACTRL_MODE = 0x0;                                                                             
+
+    // Wait for all control signals to go inactive (for read and write)
+    while (((ctrladrhi=CTRLADRHI_IN)&(MASK))==(MASK) ) {}   
     // Wait on falling edge of clock when address wll be valid and control signals will become valid shortly
     while ( (ctrladrhi = CTRLADRHI_IN)&CLK4 ) {}                                           
     address = (((ctrladrhi>>8)&0xFF00)|((ADR_LO_IN)&0xFF)) ;
 #ifdef LOWER_ROM_ENABLE    
-    romdata = (address & 0x8000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
+    romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
 #else
     romdata = *(romptr+(address&0x3FFF)) ;
 #endif
     ctrladrhi = CTRLADRHI_IN;
 #endif
 
-    if ( LOROMRD || (HIROMRD && romptr) ) {
+    if ( LOROMRD || (HIROMRD && romptr)) {
       DATACTRL_OUT = romdata | ROMDIS;
       DATACTRL_MODE = DATA | ROMDIS;
+      // Tristate databus as soon as read signal goes high. 
+      while ( !(ctrladrhi&ROMEN_B)) {ctrladrhi=CTRLADRHI_IN;}
+      DATACTRL_MODE = 0x00 ; 
     } else if ( ROMSEL ) {
-      romnum   = DATACTRL_IN &0x0F ;   // allow only 16 ROMs and assume ok to alias higher ROMs
-      romptr = (valid_upperrom[romnum]) ? (char *) upperrom[romnum]: NULL;
+      // allow only 16 ROMs and assume ok to alias higher ROMs
+      romnum = DATACTRL_IN&0x0F;
+      while ( (ctrladrhi = CTRLADRHI_IN)&WR_B ) {romnum = DATACTRL_IN&0x0F;}                                           
+      if (valid_upperrom[romnum]) {
+        romptr = (char *) upperrom[romnum] ;
+      } else {
+        romptr = NULL;
+      }
     }
 #ifdef RAM_EXP_ENABLE
     else if ( RAMRD || RAMWR ) {

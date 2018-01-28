@@ -1,7 +1,8 @@
 #!/bin/tcsh
 
+foreach f ( `ls -1 *ROM`)
+    set filename = $f:r
+    
+    python bin2csv.py $filename.ROM > $filename.CSV
 
-python bin2csv.py CWTA.ROM > CWTA.CSV
-python bin2csv.py dummy.ROM > dummy.CSV
-python bin2csv.py BASIC_1.0.ROM > BASIC_1.0.CSV
-python bin2csv.py OS_464.ROM > OS_464.CSV
+end
