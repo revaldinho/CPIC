@@ -243,7 +243,7 @@ const char upperrom[MAXROMS][ROMSIZE] = {
 };
 
 const boolean valid_upperrom[MAXROMS] = {
-  false, false , true, false,
+  true, true , true, true,
   false, false, false, false,
   false, false, false, false,
   false, false, false, false
@@ -286,8 +286,12 @@ void setup() {
   //PORTC_PCR5 = 0x0144;
   //PORTC_PCR6 = 0x0144;
   //PORTC_PCR7 = 0x0144;
-  //PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
+  PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
   //PORTC_PCR9 = 0x0144; // as above for RAMDIS
+
+  DATACTRL_OUT = 0x00 ; 
+  DATACTRL_MODE = 0x00 | ROMDIS |RAMDIS ; 
+
 }
 
 void loop() {
@@ -308,6 +312,7 @@ void loop() {
 #endif  
   char romdata; 
 
+  
   while (true) {
 #ifdef TEENSY_ASM
    asm volatile (
@@ -363,10 +368,12 @@ void loop() {
 #else
 
     // Wait for all control signals to go inactive (for read and write)
-    while (((ctrladrhi=CTRLADRHI_IN)&(MASK))==(MASK) ) {}   
+    while (((ctrladrhi=CTRLADRHI_IN)&(RD_B|WR_B|CLK4))!=(RD_B|WR_B|CLK4) ) {}   
+    DATACTRL_OUT = 0x00 ;
+    DATACTRL_MODE = 0x00 | ROMDIS; 
     // Wait on falling edge of clock when address wll be valid and control signals will become valid shortly
     while ( (ctrladrhi = CTRLADRHI_IN)&CLK4 ) {}                                           
-    address = (((ctrladrhi>>8)&0xFF00)|((ADR_LO_IN)&0xFF)) ;
+    address = (((ctrladrhi>>8)&0xFF00)|((ADR_LO_IN)&0x00FF)) ;
 #ifdef LOWER_ROM_ENABLE    
     romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
 #else
@@ -376,15 +383,11 @@ void loop() {
 #endif
 
     if ( LOROMRD || (HIROMRD && romptr)) {
-      DATACTRL_OUT = romdata | ROMDIS;
-      DATACTRL_MODE = DATA | ROMDIS;
-      // Tristate databus as soon as read signal goes high. 
-      while ( !(ctrladrhi&ROMEN_B)) {ctrladrhi=CTRLADRHI_IN;}
-      DATACTRL_MODE = 0x00 ; 
+      DATACTRL_OUT = romdata | ROMDIS ;
+      DATACTRL_MODE = DATA | ROMDIS ;
     } else if ( ROMSEL ) {
       // allow only 16 ROMs and assume ok to alias higher ROMs
-      romnum = DATACTRL_IN&0x0F;
-      while ( (ctrladrhi = CTRLADRHI_IN)&WR_B ) {romnum = DATACTRL_IN&0x0F;}                                           
+      romnum = (DATACTRL_IN)&0x0F;
       if (valid_upperrom[romnum]) {
         romptr = (char *) upperrom[romnum] ;
       } else {
