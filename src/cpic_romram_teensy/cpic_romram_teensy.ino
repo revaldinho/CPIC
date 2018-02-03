@@ -236,9 +236,9 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
@@ -254,7 +254,7 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 };
 
 const boolean valid_upperrom[MAXROMS] = {
-  false, false , true, false,
+  false, true, false, false,
   true, true, true, true,
   false, false, false, false,
   false, false, false, false
@@ -360,8 +360,10 @@ void loop() {
       );
 #else
     // Wait on falling edge of clock when address wll be valid and control signals will become valid shortly
-    //while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
-    while ( ! ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+    while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+    //while (  !((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+    //while ( ((ctrladrhi=CTRLADRHI_IN)&(ROMEN_B|IOREQ_B) ) == (ROMEN_B|IOREQ_B)) {}
+    
     address = (((ctrladrhi>>8)&0x0FF00)|(ADR_LO_IN&0x00FF)) ;
 #ifdef LOWER_ROM_ENABLE    
     romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
