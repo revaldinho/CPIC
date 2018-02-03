@@ -302,6 +302,7 @@ void loop() {
   register int address;         // register for use with assembler code
   char *romptr = NULL;
   char romdata = 0; 
+  int adr_lo = 0;
  
   while (true) {
 #ifdef TEENSY_ASM
@@ -352,13 +353,9 @@ void loop() {
       );
 #else
 
-    // Wait for a new instruction
-    //while (  !((ctrladrhi=CTRLADRHI_IN)&(M1_B)) ) {}
     while (  !((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
-    // Wait on falling edge of clock when address wll be valid and control signals will become valid shortly
-    // while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) == (CLK4)) {}
     address =((ctrladrhi>>8)&0xFF00)|(ADR_LO_IN&0x00FF);
-    
+
 #ifdef LOWER_ROM_ENABLE    
     romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
 #else
