@@ -212,7 +212,7 @@
 #define RAMBANKMASK       0x00000007  // Bottom 3 bits are the 'code'
 
 // ---- Constants and macros
-#define MAXROMS           16
+#define MAXROMS           8
 #define RAMBLKSIZE        16384
 #define ROMSIZE           16384
 
@@ -235,30 +235,20 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOPIA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 };
 
-char ram[ROMSIZE] ;
+char ram[MAXROMS*ROMSIZE] ;
 
 const boolean valid_upperrom[MAXROMS] = {
-  false, true, false, true,
-  true, true, true, true,
+  false, true, true, true,
   false, false, false, false,
-  false, false, false, false
 };
 
 #ifdef LOWER_ROM_ENABLE
@@ -286,7 +276,7 @@ void setup() {
   }
 
 
-  memcpy( ram, &(upperrom[1<<14]), ROMSIZE);
+  memcpy( ram, upperrom, MAXROMS*ROMSIZE);
   // Initialize 245 to drive from CPC to TS, set ROM/RAMDIS low, disable 245 driver
   DATACTRL_OUT  = 0x00 |  0     |  0     | 0    | DIR_CPCTOTS ; 
   DATACTRL_MODE = 0x00 | ROMDIS |RAMDIS  | OE_B | DIR; 
@@ -301,9 +291,7 @@ void loop() {
   register int ctrladrhi;       // register for use with assembler code
   register int address;         // register for use with assembler code
   char *romptr = NULL;
-  char romdata = 0; 
-  int adr_lo = 0;
- 
+  char romdata = 0;  
   while (true) {
 #ifdef TEENSY_ASM
    asm volatile (
@@ -353,30 +341,29 @@ void loop() {
       );
 #else
 
+    // Wait 'til CLK4 goes high and sample low address bits shortly after
     while (  !((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
     address =((ctrladrhi>>8)&0xFF00)|(ADR_LO_IN&0x00FF);
+    // Now wait for falling edge of clock and resample control bits shortly after
+    while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+#endif
 
+    if ( LOROMRD || (HIROMRD && romptr)) {   
 #ifdef LOWER_ROM_ENABLE    
-    romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
+      romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
 #else
-    romdata = *(romptr+(address&0x3FFF)) ;
-    //romdata = ((address>>8)&0xFF);
-    //romdata = ram[address&0x3FFF];
+      romdata = *(romptr+(address&0x3FFF)) ;
 #endif
-    ctrladrhi = CTRLADRHI_IN;
-#endif
-
-    if ( LOROMRD || (HIROMRD && romptr)) {
       DATACTRL_OUT  = romdata | ROMDIS |RAMDIS  | 0    | 0 ; 
       DATACTRL_MODE = 0xFF    | ROMDIS |RAMDIS  | OE_B | DIR; 
       while ( !(CTRLADRHI_IN&(ROMEN_B|RD_B)) ) {}  
       DATACTRL_MODE = 0x00    | ROMDIS |RAMDIS  | OE_B | DIR; 
-      DATACTRL_OUT  = romdata | 0      |  0     | 0    | DIR_CPCTOTS ;  
+      DATACTRL_OUT  = romdata | 0      |  0     | 0    | DIR_CPCTOTS ;
     } else if ( ROMSEL ) {
-      // allow only 16 ROMs and assume ok to alias higher ROMs
       romnum = (DATACTRL_IN)&0x0F;
       if (valid_upperrom[romnum]) {
-        romptr = (char *) &(upperrom[romnum<<14]) ;
+        //romptr = (char *) &(upperrom[romnum<<14]) ;
+        romptr = (char *) &(ram[romnum<<14]) ;
       } else {
         romptr = NULL;
       }
