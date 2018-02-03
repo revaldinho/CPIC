@@ -147,6 +147,7 @@
   
   Osc @ 0.5MHz -> 1000ns high/low time
 */
+#include <string.h>
 
 // ----- Some string processing definitions to enable use of C tokens in assembler statements
 #define str(a) st(a)
@@ -185,7 +186,11 @@
 #define DATA              0x000000FF
 #define ROMDIS            0x00000100
 #define RAMDIS            0x00000200
-#define WAIT_B            0x00000400
+#define OE_B              0x00000400
+#define DIR_CPCTOTS       0x00000800
+#define DIR_TSTOCPC       0x00000000
+#define DIR               0x00000800
+
 
 #define MREQ_B            0x00000001 // Port B0
 #define IOREQ_B           0x00000002
@@ -195,7 +200,7 @@
 #define M1_B              0x00000020 // Port B5 
 #define RD_B              0x00000400 // Port B10 (because 6-9 not available)  
 #define CLK4              0x00000800
-#define MASK              0x0000001F // All above control signals inactive (but ignore RD_B in aggregate)
+#define MASK              0x00000013 // Mask on subset temporarily
 
 #define ADDR_HI           0x00FF0000  // bits 16-23 on control input data
 #define ADDR_LO           0x000000FF  // bits  0-7 on address input
@@ -210,12 +215,7 @@
 // ---- Constants and macros
 #define MAXROMS           16
 #define RAMBLKSIZE        16384
-
-#ifdef DEBUG
-#define ROMSIZE           32
-#else
 #define ROMSIZE           16384
-#endif
 
 #define ROMSEL            (!(ctrladrhi&(IOREQ_B|ADR_13_RAW|WR_B)))
 #define RAMSEL            (!(ctrladrhi&(IOREQ_B|ADR_15_RAW|WR_B)))
@@ -229,22 +229,33 @@
 #define RAMWR             (!(ctrladrhi&(MREQ_B|WR_B)))
 
 // Global variables
-const char upperrom[MAXROMS][ROMSIZE] = {
-#ifdef DEBUG
-  0, 0, 0, 0, 0
-#else
-#include "/Users/richarde/Documents/Development/git/CPiC/src/BASIC_1.0.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOPIA.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
+const char upperrom[MAXROMS*ROMSIZE] = {
+//#include "/Users/richarde/Documents/Development/git/CPiC/src/BASIC_1.0.CSV"
+//#include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
+//#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOPIA.CSV"
+//#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
+//#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
-#endif
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 };
 
 const boolean valid_upperrom[MAXROMS] = {
-  true, true , true, true,
-  false, false, false, false,
+  false, false , true, false,
+  true, true, true, true,
   false, false, false, false,
   false, false, false, false
 };
@@ -260,7 +271,6 @@ const char lowerrom[] = {
 #endif
 };
 #endif
-
 #ifdef RAM_EXP_ENABLE
 char ram[8][RAMBLKSIZE] ;                   //  128K for D'ktronics RAM exp
 const int ramblocklut[4][16] = {
@@ -274,24 +284,12 @@ const int ramblocklut[4][16] = {
 void setup() {
   // Set all pins to input mode using pinMode instructions as easy way of setting up
   // GPIO control - can use port registers after this initialization
-  for (int i = 0 ; i < 58 ; i++ ) {
+  for (int i = 0 ; i < 54 ; i++ ) {
     pinMode(i, INPUT);
   }
-
-  //PORTC_PCR0 = 0x0144;
-  //PORTC_PCR1 = 0x0144;
-  //PORTC_PCR2 = 0x0144;
-  //PORTC_PCR3 = 0x0144;
-  //PORTC_PCR4 = 0x0144;
-  //PORTC_PCR5 = 0x0144;
-  //PORTC_PCR6 = 0x0144;
-  //PORTC_PCR7 = 0x0144;
-  PORTC_PCR8 = 0x0144; // switch on GPIO control, high drive, fast slew for ROMDIS
-  //PORTC_PCR9 = 0x0144; // as above for RAMDIS
-
-  DATACTRL_OUT = 0x00 ; 
-  DATACTRL_MODE = 0x00 | ROMDIS |RAMDIS ; 
-
+  // Initialize 245 to drive from CPC to TS, set ROM/RAMDIS low, disable 245 driver
+  DATACTRL_OUT  = 0x00 |  0     |  0     | 0    | DIR_CPCTOTS ; 
+  DATACTRL_MODE = 0x00 | ROMDIS |RAMDIS  | OE_B | DIR; 
 }
 
 void loop() {
@@ -305,14 +303,9 @@ void loop() {
   int romnum = 0;
   register int ctrladrhi;       // register for use with assembler code
   register int address;         // register for use with assembler code
-#ifdef DEBUG
-  char *romptr = (char *)upperrom[0];
-#else
   char *romptr = NULL;
-#endif  
-  char romdata; 
-
-  
+  char romdata = 0; 
+ 
   while (true) {
 #ifdef TEENSY_ASM
    asm volatile (
@@ -366,33 +359,34 @@ void loop() {
         :   "r9", "r10"                                                                        // Register clobber list
       );
 #else
-
-    // Wait for all control signals to go inactive (for read and write)
-    while (((ctrladrhi=CTRLADRHI_IN)&(RD_B|WR_B|CLK4))!=(RD_B|WR_B|CLK4) ) {}   
-    DATACTRL_OUT = 0x00 ;
-    DATACTRL_MODE = 0x00 | ROMDIS; 
     // Wait on falling edge of clock when address wll be valid and control signals will become valid shortly
-    while ( (ctrladrhi = CTRLADRHI_IN)&CLK4 ) {}                                           
-    address = (((ctrladrhi>>8)&0xFF00)|((ADR_LO_IN)&0x00FF)) ;
+    //while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+    while ( ! ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+    address = (((ctrladrhi>>8)&0x0FF00)|(ADR_LO_IN&0x00FF)) ;
 #ifdef LOWER_ROM_ENABLE    
     romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
 #else
     romdata = *(romptr+(address&0x3FFF)) ;
+    //romdata = ((address>>8)&0xFF);
 #endif
     ctrladrhi = CTRLADRHI_IN;
 #endif
 
     if ( LOROMRD || (HIROMRD && romptr)) {
-      DATACTRL_OUT = romdata | ROMDIS ;
-      DATACTRL_MODE = DATA | ROMDIS ;
+      DATACTRL_OUT  = romdata | ROMDIS |RAMDIS  | 0    | 0 ; 
+      DATACTRL_MODE = 0xFF    | ROMDIS |RAMDIS  | OE_B | DIR; 
+      while ( !(CTRLADRHI_IN&(ROMEN_B|RD_B|MREQ_B)) ) {}  
+      DATACTRL_MODE = 0x00    | ROMDIS |RAMDIS  | OE_B | DIR; 
+      DATACTRL_OUT  = romdata | 0      |  0     | 0    | DIR_CPCTOTS ;  
     } else if ( ROMSEL ) {
       // allow only 16 ROMs and assume ok to alias higher ROMs
       romnum = (DATACTRL_IN)&0x0F;
       if (valid_upperrom[romnum]) {
-        romptr = (char *) upperrom[romnum] ;
+        romptr = (char *) &(upperrom[romnum<<14]) ;
       } else {
         romptr = NULL;
       }
+     while ( ! ((CTRLADRHI_IN)&IOREQ_B) ) {}
     }
 #ifdef RAM_EXP_ENABLE
     else if ( RAMRD || RAMWR ) {

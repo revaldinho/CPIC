@@ -14,7 +14,7 @@ if len(hexbytes) < 16384:
     hexbytes.extend( [0]*(16384-len(hexbytes)))
 
     
-for i in range(0,len(hexbytes),16):
+for i in range(0,16383,16):
     hexlines.append( ','.join([ "0x%02X" %b  for b in hexbytes[i:i+16] ]))
 
 print( ",\n".join(hexlines))
