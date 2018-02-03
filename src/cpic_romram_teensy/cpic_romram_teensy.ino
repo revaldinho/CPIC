@@ -153,7 +153,6 @@
 #define str(a) st(a)
 #define st(a) #a
 
-//#define DEBUG            1
 //#define TEENSY_ASM       1
 //#define LOWER_ROM_ENABLE 1
 //#define RAM_EXP_ENABLE   1
@@ -253,8 +252,10 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 };
 
+char ram[ROMSIZE] ;
+
 const boolean valid_upperrom[MAXROMS] = {
-  false, true, false, false,
+  false, true, false, true,
   true, true, true, true,
   false, false, false, false,
   false, false, false, false
@@ -264,11 +265,7 @@ const boolean valid_upperrom[MAXROMS] = {
 // This will be the content of the AMSTRAD Firmware ROM to allow replacement
 // of a CPC464 or 664 ROM with that from a 6128.
 const char lowerrom[] = {
-#ifdef DEBUG
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9
-#else
 #include "/Users/richarde/Documents/Development/git/CPiC/src/OS_464.CSV"
-#endif
 };
 #endif
 #ifdef RAM_EXP_ENABLE
@@ -287,6 +284,9 @@ void setup() {
   for (int i = 0 ; i < 54 ; i++ ) {
     pinMode(i, INPUT);
   }
+
+
+  memcpy( ram, &(upperrom[1<<14]), ROMSIZE);
   // Initialize 245 to drive from CPC to TS, set ROM/RAMDIS low, disable 245 driver
   DATACTRL_OUT  = 0x00 |  0     |  0     | 0    | DIR_CPCTOTS ; 
   DATACTRL_MODE = 0x00 | ROMDIS |RAMDIS  | OE_B | DIR; 
@@ -294,9 +294,6 @@ void setup() {
 
 void loop() {
 #ifdef RAM_EXP_ENABLE
-  #ifdef DEBUG
-  int ram_lut_col = 2;
-  #endif
   int ramblock;
   int ram_lut_row = 0;
 #endif  
@@ -317,12 +314,7 @@ void loop() {
 "loop0:  ldr     %[ctrladrhi], [r9, #" str(GPIOB_PDIR_OFFSET) "]\n"   // Sample control signals                           
         "lsls    %[adrortmp], %[ctrladrhi], #21\n\t"                  // Check READ bit only  by shifting 21 places into MSB to see if we can tristate databus (which will be earlier than ROMEN_B and other derived signals)
         "bpl.n   loop0\n\t"                                           // Loop again if rd_b is zero
-                                                                         
-#ifdef DEBUG                                                             
-        "str     %[adrortmp],[r9, #"  str(GPIOC_PDOR_OFFSET) "]\n"    // zero ROMDIS/RAMDIS for easy observation in debug mode
-#else                                                                 
-        "strb    %[adrortmp],[r9, #"  str(GPIOC_PDDR_OFFSET) "]\n"    // tristate the data bits only (lowest byte) normally if RD_B is high
-#endif                                                                                                                                      
+        "strb    %[adrortmp],[r9, #"  str(GPIOC_PDDR_OFFSET) "]\n"    // tristate the data bits only (lowest byte) normally if RD_B is high                                                                                                                                
                                                                       // Exit loop - now wait for all ctrl signals to go inactive (presampled above)
 "loop1:  and     %[adrortmp], %[ctrladrhi],  #" str(MASK) "\n\t"      // Mask off control bits 
         "subs    %[adrortmp], %[adrortmp], #" str(MASK) "\n\t"        // subtract mask from %[adrortmp]. %[adrortmp] will be all-zeroes on exit
@@ -359,17 +351,20 @@ void loop() {
         :   "r9", "r10"                                                                        // Register clobber list
       );
 #else
+
+    // Wait for a new instruction
+    //while (  !((ctrladrhi=CTRLADRHI_IN)&(M1_B)) ) {}
+    while (  !((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
     // Wait on falling edge of clock when address wll be valid and control signals will become valid shortly
-    while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
-    //while (  !((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
-    //while ( ((ctrladrhi=CTRLADRHI_IN)&(ROMEN_B|IOREQ_B) ) == (ROMEN_B|IOREQ_B)) {}
+    // while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) == (CLK4)) {}
+    address =((ctrladrhi>>8)&0xFF00)|(ADR_LO_IN&0x00FF);
     
-    address = (((ctrladrhi>>8)&0x0FF00)|(ADR_LO_IN&0x00FF)) ;
 #ifdef LOWER_ROM_ENABLE    
     romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
 #else
     romdata = *(romptr+(address&0x3FFF)) ;
     //romdata = ((address>>8)&0xFF);
+    //romdata = ram[address&0x3FFF];
 #endif
     ctrladrhi = CTRLADRHI_IN;
 #endif
@@ -377,7 +372,7 @@ void loop() {
     if ( LOROMRD || (HIROMRD && romptr)) {
       DATACTRL_OUT  = romdata | ROMDIS |RAMDIS  | 0    | 0 ; 
       DATACTRL_MODE = 0xFF    | ROMDIS |RAMDIS  | OE_B | DIR; 
-      while ( !(CTRLADRHI_IN&(ROMEN_B|RD_B|MREQ_B)) ) {}  
+      while ( !(CTRLADRHI_IN&(ROMEN_B|RD_B)) ) {}  
       DATACTRL_MODE = 0x00    | ROMDIS |RAMDIS  | OE_B | DIR; 
       DATACTRL_OUT  = romdata | 0      |  0     | 0    | DIR_CPCTOTS ;  
     } else if ( ROMSEL ) {
@@ -390,6 +385,7 @@ void loop() {
       }
      while ( ! ((CTRLADRHI_IN)&IOREQ_B) ) {}
     }
+    
 #ifdef RAM_EXP_ENABLE
     else if ( RAMRD || RAMWR ) {
       if ( ram_lut_col > -1 ) {
