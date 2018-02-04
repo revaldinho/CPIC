@@ -235,10 +235,10 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOPIA.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOPIA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
@@ -247,7 +247,7 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 char ram[MAXROMS*ROMSIZE] ;
 
 const boolean valid_upperrom[MAXROMS] = {
-  false, true, true, true,
+  false, true, false, false,
   false, false, false, false,
 };
 
@@ -340,23 +340,31 @@ void loop() {
         :   "r9", "r10"                                                                        // Register clobber list
       );
 #else
+//
+// Recipe 1 - trigger off CLK4
+//
+//    // Wait 'til CLK4 goes high and sample low address bits shortly after
+//    while (  !((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+//    address =((ctrladrhi>>8)&0xFF00)|(ADR_LO_IN&0x00FF);
+//    // Now wait for falling edge of clock and resample control bits shortly after
+//    while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+//
 
-    // Wait 'til CLK4 goes high and sample low address bits shortly after
-    while (  !((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
+// Recipe 2 - trigger off M1 or RD or WR
+    while ( ((ctrladrhi=CTRLADRHI_IN)&(M1_B|RD_B|WR_B)) == (M1_B|RD_B|WR_B) ) {}
     address =((ctrladrhi>>8)&0xFF00)|(ADR_LO_IN&0x00FF);
-    // Now wait for falling edge of clock and resample control bits shortly after
-    while (  ((ctrladrhi=CTRLADRHI_IN)&(CLK4)) ) {}
-#endif
-
-    if ( LOROMRD || (HIROMRD && romptr)) {   
 #ifdef LOWER_ROM_ENABLE    
       romdata = (address & 0x4000)? *(romptr+(address&0x3FFF)) : lowerrom[address&0x3FFF]  ;
 #else
       romdata = *(romptr+(address&0x3FFF)) ;
 #endif
+    ctrladrhi=CTRLADRHI_IN;
+#endif
+
+    if ( LOROMRD || (HIROMRD && romptr)) {   
       DATACTRL_OUT  = romdata | ROMDIS |RAMDIS  | 0    | 0 ; 
       DATACTRL_MODE = 0xFF    | ROMDIS |RAMDIS  | OE_B | DIR; 
-      while ( !(CTRLADRHI_IN&(ROMEN_B|RD_B)) ) {}  
+      while ((CTRLADRHI_IN&(MREQ_B|RD_B)) !=(MREQ_B|RD_B) ) {}  
       DATACTRL_MODE = 0x00    | ROMDIS |RAMDIS  | OE_B | DIR; 
       DATACTRL_OUT  = romdata | 0      |  0     | 0    | DIR_CPCTOTS ;
     } else if ( ROMSEL ) {
@@ -367,7 +375,7 @@ void loop() {
       } else {
         romptr = NULL;
       }
-     while ( ! ((CTRLADRHI_IN)&IOREQ_B) ) {}
+     while ( ! ((CTRLADRHI_IN)&WR_B) ) {}
     }
     
 #ifdef RAM_EXP_ENABLE
