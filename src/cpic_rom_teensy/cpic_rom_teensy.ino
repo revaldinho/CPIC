@@ -221,8 +221,8 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM114.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM15.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/UTOP107.CSV"
@@ -233,7 +233,7 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 char ram[MAXROMS*ROMSIZE] ;
 
 const boolean valid_upperrom[MAXROMS] = {
-  false, true, true, true,
+  false, false, true, false,
   false, false, false, false
 };
 
@@ -252,19 +252,19 @@ void loop() {
   int address;         
   char *romptr = NULL;
   char romdata = 0;  
-  int romnum;
   
   while (true) {
     while ( ((ctrladrhi=CTRLADRHI_IN)&(M1_B|RD_B|WR_B)) == (M1_B|RD_B|WR_B) ) { }
     address =((ctrladrhi>>8)&0x3F00)|(ADRLO_DINLO_IN&0x00FF);
     romdata = *(romptr+address) ;
-    ctrladrhi=CTRLADRHI_IN;
+    if ( !(ctrladrhi&M1_B) ) {
+      ctrladrhi=CTRLADRHI_IN;
+    }
     if (HIROMRD && romptr) {   
       DATACTRL_OUT  = romdata | ROMVALID   ;  
       while ( !(CTRLADRHI_IN&RD_B) ) {} 
     } else if ( ROMSEL ) {
-      //int romnum = (DATACTRL_IN)&0x07;         // Limit to 8 ROMS
-      romnum = (ADRLO_DINLO_IN&0x0F000)>>12; // Limit to 8 ROMS and kill LSB which appears stuck at zero
+      int romnum = (ADRLO_DINLO_IN&0x0F000)>>12;
       if (valid_upperrom[romnum]) {
         romptr = (char *) &(ram[romnum<<14]) ;
         DATACTRL_OUT  = 0x00 | ROMVALID   ;  
