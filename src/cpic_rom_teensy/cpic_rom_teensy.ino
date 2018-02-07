@@ -154,7 +154,6 @@
 #define st(a) #a
 
 //#define LOWER_ROM_ENABLE 1
-//#define RAM_EXP_ENABLE   1
 
 // --- Port allocations
 // Data direction is the opposite of ChipKit - on Teensy 0=input, 1=Output
@@ -177,13 +176,12 @@
 #define  DATACTRL_OUT     GPIOC_PDOR
 #define  DATACTRL_MODE    GPIOC_PDDR
 #define  DATACTRL_CLEAR   GPIOC_PCOR
-#define  ADR_LO_IN        GPIOD_PDIR
-#define  ADR_LO_MODE      GPIOD_PDDR
+#define  ADRLO_DINLO_IN        GPIOD_PDIR
+#define  ADRLO_DINLO_MODE      GPIOD_PDDR
 
 // --- Bit allocations
 #define DATA              0x000000FF
-#define ROMDIS            0x00000100
-#define RAMDIS            0x00000200
+#define ROMVALID          0x00000100
 #define WAIT_B            0x00000400
 
 #define MREQ_B            0x00000001 // Port B0
@@ -201,6 +199,7 @@
 #define ADR_13_RAW        0x00200000  // bit 13 in raw position in ctrl/adr word - ie bit 21
 #define ADR_14_RAW        0x00400000  // bit 14 in raw position in ctrl/adr word - ie bit 22
 #define ADR_15_RAW        0x00800000  // bit 15 in raw position in ctrl/adr word - ie bit 23
+#define DIN_LO            0x0000F000  // bits 12..15
 
 #define VALIDRAMSELMASK   0x000000C0  // Top two bits of Data must be set for a valid RAM selection
 #define RAMCODEMASK       0x00000038  // Next 3 bits are the 'code'
@@ -212,10 +211,7 @@
 #define ROMSIZE           16384
 
 #define ROMSEL            (!(ctrladrhi&(IOREQ_B|ADR_13_RAW|WR_B)))
-#define RAMSEL            (!(ctrladrhi&(IOREQ_B|ADR_15_RAW|WR_B)))
 #define HIROMRD           ((ctrladrhi&(ROMEN_B|ADR_14_RAW))==(ADR_14_RAW))
-#define RAMRD             (!(ctrladrhi&(RAMRD_B)))
-#define RAMWR             (!(ctrladrhi&(MREQ_B|WR_B)))
 
 // Global variables
 const char upperrom[MAXROMS*ROMSIZE] = {
@@ -226,105 +222,58 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 //#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM114.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOPIA.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/BEEBUG.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM15.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOP107.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/EXBASIC.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
 };
 
 char ram[MAXROMS*ROMSIZE] ;
 
 const boolean valid_upperrom[MAXROMS] = {
-  false, true, true, false,
+  false, true, true, true,
   false, false, false, false
 };
-
-#ifdef RAM_EXP_ENABLE
-char ram[8][RAMBLKSIZE] ;                   //  128K for D'ktronics RAM exp
-const int ramblocklut[4][16] = {
-  -1,  3, 3,  3, -1, -1, -1, -1, -1,  7,  7,  7, -1, -1, -1, -1,
-  -1, -1, 2, -1, -1, -1, -1, -1, -1, -1,  6, -1, -1, -1, -1, -1,
-  -1, -1, 1, -1,  0,  1,  2,  3, -1, -1,  5, -1,  4,  5,  6,  7,
-  -1, -1, 0, -1, -1, -1, -1, -1, -1, -1,  4, -1, -1, -1, -1, -1,
-};
-#endif
 
 void setup() {
   // Set all pins to input mode using pinMode instructions as easy way of setting up
   // GPIO control - can use port registers after this initialization
-  for (int i = 0 ; i < 54 ; i++ ) {
+  for (int i = 0 ; i < 58 ; i++ ) {
     pinMode(i, INPUT);
   }
-
-
   memcpy( ram, upperrom, MAXROMS*ROMSIZE);
-  DATACTRL_OUT  = 0x00 |  ROMDIS     ; // Keep ROMDIS data high 
-  DATACTRL_MODE = 0x00 |  0          ; // But only drive ROMDIS out when required and leave it to be pulled low
+  DATACTRL_OUT  = 0x00 |  0     ; 
+  DATACTRL_MODE = 0xFF |  ROMVALID ; // Always drive out - OE taken care of externally
 }
-
-void loop() {
-#ifdef RAM_EXP_ENABLE
-  int ramblock;
-  int ram_lut_row = 0;
-#endif  
-  int romnum = 0;
-  register int ctrladrhi;       // register for use with assembler code
-  register int address;         // register for use with assembler code
-  volatile register char *romptr = NULL;
-  register char romdata = 0;  
+void loop() { 
+  int ctrladrhi;       
+  int address;         
+  char *romptr = NULL;
+  char romdata = 0;  
+  int romnum;
   
   while (true) {
     while ( ((ctrladrhi=CTRLADRHI_IN)&(M1_B|RD_B|WR_B)) == (M1_B|RD_B|WR_B) ) { }
-     // Cut address to 14b immediately - need to undo this and use 16b if RAM expansion is enabled
-    address =((ctrladrhi>>8)&0x3F00)|(ADR_LO_IN&0x00FF);
+    address =((ctrladrhi>>8)&0x3F00)|(ADRLO_DINLO_IN&0x00FF);
     romdata = *(romptr+address) ;
     ctrladrhi=CTRLADRHI_IN;
     if (HIROMRD && romptr) {   
-      DATACTRL_OUT  = romdata | ROMDIS   ;  // setup data and ROMDIS
-      DATACTRL_MODE = 0xFF    | ROMDIS   ;  // Drive both out
+      DATACTRL_OUT  = romdata | ROMVALID   ;  
       while ( !(CTRLADRHI_IN&RD_B) ) {} 
-      DATACTRL_MODE = 0x00    | 0        ;  // Disable ROMDIS driver (pulled low) and data driver
     } else if ( ROMSEL ) {
-      romnum = (DATACTRL_IN)&0x07; // Limit to 8 ROMS
+      //int romnum = (DATACTRL_IN)&0x07;         // Limit to 8 ROMS
+      romnum = (ADRLO_DINLO_IN&0x0F000)>>12; // Limit to 8 ROMS and kill LSB which appears stuck at zero
       if (valid_upperrom[romnum]) {
-        //romptr = (char *) &(upperrom[romnum<<14]) ;
         romptr = (char *) &(ram[romnum<<14]) ;
+        DATACTRL_OUT  = 0x00 | ROMVALID   ;  
       } else {
         romptr = NULL;
+        DATACTRL_OUT  = 0x00 | 0   ;  
       }
-     while ( ! ((CTRLADRHI_IN)&WR_B) ) {}
+      while ( ! ((CTRLADRHI_IN)&WR_B) ) {}
     } 
-    
-#ifdef RAM_EXP_ENABLE
-    else if ( RAMRD || RAMWR ) {
-      if ( ram_lut_col > -1 ) {
-         ram_lut_row = (address & 0xC000) >> 14;
-         ramblock = ramblocklut[ram_lut_row][ram_lut_col];
-         if (ramblock >= 0 ) {
-           if (RAMWR) {
-             DATACTRL_OUT =  RAMDIS;   
-             DATACTRL_MODE = RAMDIS;
-             ram[ramblock][address&0x3FFF] = DATACTRL_IN & DATA;
-           } else {
-             DATACTRL_OUT = ram[ramblock][address&0x3FFF] | RAMDIS;
-             DATACTRL_MODE = DATA | RAMDIS;
-           }
-         }
-      }
-    } else if ( RAMSEL ) {
-      int datain = DATACTRL_IN & DATA;
-      if ((datain & VALIDRAMSELMASK) == VALIDRAMSELMASK) {
-        // Now validate that only codes 000xxx or 001xxx are used - other codes unsupported (default to machine built-in RAM)
-        if ((datain & RAMCODEMASK) <= 0x08) {
-          ram_lut_col   = datain & RAMBANKMASK; // Set column for the RAM block lookup
-        } else {
-          ram_lut_col   = -1;          // disable RAM expansion
-        }
-      }
-    } 
-#endif
   }
 }
             
