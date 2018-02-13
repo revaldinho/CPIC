@@ -148,11 +148,16 @@
   Osc @ 0.5MHz -> 1000ns high/low time
 */
 #include <string.h>
+#include <stdio.h>
+
+extern void asmloop( int *romvalid, char *romdata );
+
 
 // ----- Some string processing definitions to enable use of C tokens in assembler statements
 #define str(a) st(a)
 #define st(a) #a
 
+#define USE_ASM_LOOP       1
 //#define LOWER_ROM_ENABLE 1
 
 // --- Port allocations
@@ -211,7 +216,8 @@
 #define ROMSIZE           16384
 
 #define ROMSEL            (!(ctrladrhi&(IOREQ_B|ADR_13_RAW|WR_B)))
-#define HIROMRD           ((ctrladrhi&(ROMEN_B|ADR_14_RAW))==(ADR_14_RAW))
+//#define HIROMRD           ((ctrladrhi&(ROMEN_B|ADR_14_RAW))==(ADR_14_RAW))
+#define HIROMRD           (!(ctrladrhi&(ROMEN_B)))
 
 // Global variables
 const char upperrom[MAXROMS*ROMSIZE] = {
@@ -232,9 +238,8 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 
 char ram[MAXROMS*ROMSIZE] ;
 
-const boolean valid_upperrom[MAXROMS] = {
-  false, false, true, false,
-  false, false, false, false
+const int valid_upperrom[MAXROMS] = {
+  0,0,ROMVALID,ROMVALID,0,0,0,0
 };
 
 void setup() {
@@ -248,33 +253,32 @@ void setup() {
   DATACTRL_MODE = 0xFF |  ROMVALID ; // Always drive out - OE taken care of externally
 }
 void loop() { 
+#ifdef USE_ASM_LOOP
+  asmloop( (int *) valid_upperrom, (char *) ram );
+#else
   int ctrladrhi;       
   int address;         
   char *romptr = NULL;
   char romdata = 0;  
-  
+  int romvalid = 0;
+  int adrlo_dinlo = 0;  
   while (true) {
-    while ( ((ctrladrhi=CTRLADRHI_IN)&(M1_B|RD_B|WR_B)) == (M1_B|RD_B|WR_B) ) { }
-    address =((ctrladrhi>>8)&0x3F00)|(ADRLO_DINLO_IN&0x00FF);
-    romdata = *(romptr+address) ;
-    if ( !(ctrladrhi&M1_B) ) {
-      ctrladrhi=CTRLADRHI_IN;
-    }
-    if (HIROMRD && romptr) {   
-      DATACTRL_OUT  = romdata | ROMVALID   ;  
-      while ( !(CTRLADRHI_IN&RD_B) ) {} 
+    //while ( ((ctrladrhi=CTRLADRHI_IN)&(ROMEN_B|IOREQ_B)) == (ROMEN_B|IOREQ_B) ) { }
+    //while ( ((ctrladrhi=CTRLADRHI_IN)&CLK4) ) {}
+    while ( !((ctrladrhi=CTRLADRHI_IN)&CLK4) ) {}
+    adrlo_dinlo = ADRLO_DINLO_IN;
+    if (HIROMRD) {   
+      address =((ctrladrhi>>8)&0x3F00)|(adrlo_dinlo&0x00FF);
+      romdata = *(romptr+address) ; 
+      DATACTRL_OUT  = romdata | romvalid   ;  
     } else if ( ROMSEL ) {
-      int romnum = (ADRLO_DINLO_IN&0x0F000)>>12;
-      if (valid_upperrom[romnum]) {
-        romptr = (char *) &(ram[romnum<<14]) ;
-        DATACTRL_OUT  = 0x00 | ROMVALID   ;  
-      } else {
-        romptr = NULL;
-        DATACTRL_OUT  = 0x00 | 0   ;  
-      }
-      while ( ! ((CTRLADRHI_IN)&WR_B) ) {}
+      int romnum = (adrlo_dinlo&0x0F000)>>12;
+      romvalid = valid_upperrom[romnum] ;
+      romptr = (char *) &(ram[romnum<<14]) ;
+      DATACTRL_OUT  = 0x00 | romvalid ;  
     } 
   }
+#endif
 }
             
 
