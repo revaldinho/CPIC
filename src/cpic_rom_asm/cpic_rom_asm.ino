@@ -150,7 +150,7 @@
 #include <string.h>
 #include <stdio.h>
 
-extern void asmloop( int *romvalid, char *romdata );
+
 
 
 // ----- Some string processing definitions to enable use of C tokens in assembler statements
@@ -221,25 +221,20 @@ extern void asmloop( int *romvalid, char *romdata );
 
 // Global variables
 const char upperrom[MAXROMS*ROMSIZE] = {
-//#include "/Users/richarde/Documents/Development/git/CPiC/src/BASIC_1.0.CSV"
-//#include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
-//#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOPIA.CSV"
-//#include "/Users/richarde/Documents/Development/git/CPiC/src/BCPL.CSV"
-//#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM114.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CWTA.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/PROTEXT.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/MAXAM15.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/UTOP107.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/EXBASIC.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/MAXAM114.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/CWTA.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/PROTEXT.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/MAXAM15.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/UTOP107.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/BCPL.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
 };
 
 char ram[MAXROMS*ROMSIZE] ;
 
 const int valid_upperrom[MAXROMS] = {
-  0,0,ROMVALID,ROMVALID,0,0,0,0
+  0,0,ROMVALID,0,0,0,ROMVALID,0
 };
 
 void setup() {
@@ -252,6 +247,12 @@ void setup() {
   DATACTRL_OUT  = 0x00 |  0     ; 
   DATACTRL_MODE = 0xFF |  ROMVALID ; // Always drive out - OE taken care of externally
 }
+
+void asmloop( int *romvalid, char *romdata ) {
+#include "/Users/richarde/Documents/Development/git/CPiC/src/cpic_rom_asmloop.inc"
+}
+
+
 void loop() { 
 #ifdef USE_ASM_LOOP
   asmloop( (int *) valid_upperrom, (char *) ram );

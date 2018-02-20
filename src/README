@@ -1,8 +1,17 @@
 #!/bin/tcsh
 
-foreach f ( `ls -1 *ROM`)
-    set filename = $f:r
-    
-    python bin2csv.py $filename.ROM > $filename.CSV
 
+if ( -e CSV ) rm -rf CSV
+mkdir CSV
+
+pushd ROM
+foreach f ( `ls -1 *ROM`)
+    set filename = $f:r    
+    python ../bin2csv.py $filename.ROM > ../CSV/$filename.CSV
 end
+popd
+
+
+# turn the assembler into an asm() statement
+
+python3 asm2asm.py cpic_rom_teensy/cpic_rom_asm.S | grep -v "%function" > cpic_rom_asmloop.inc 
