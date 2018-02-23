@@ -94,11 +94,11 @@ EXITLOOP:                               @ Loop until RD* and WR* both go inactiv
         and.w	r5, r2, r10        
         cmp.w	r5, r10            
         bne     EXITLOOP        
-ENTRYLOOP:                              
-        ldr	r2, [r9, #0]            
-        and.w	r5, r2, r10        
-        cmp.w	r5, r10            
-        beq     ENTRYLOOP        
+//ENTRYLOOP:                              
+//        ldr	r2, [r9, #0]            
+//        and.w	r5, r2, r10        
+//        cmp.w	r5, r10            
+//        beq     ENTRYLOOP        
 L0:     
         ldr	r2, [r9, #0]            @ r2 = [CTRLADRHI_IN] sample control and address bits
         ldr	r3, [r11, #0]           @ r3 = [ADRLO_DINLO_IN] sample datain and address low bits
@@ -117,9 +117,8 @@ ROMACCESS:
         b       EXITLOOP
 
 ROMSEL:                                 @ ROM SELECTION event
-        lsr	r3, r3, #12     	@ shift databits into bottom nybble
-        and	r3, r3, #15     	@ mask off lowest nybble (allow 16 ROMS)
-        lsl     r3, r3, #2              @ shift left by 2 places - integers are 4 bytes wide
+        lsr	r3, r3, #10     	@ shift databits into bottom byte to be ROMNUM*4 (ie shifted 2 places left) 'cos valid data is ints which are 4 bits
+        and	r3, r3, #0x3C     	@ mask off the ROM number with 00 in bottom two bits
         ldr	ip, [r0, r3]    	@ check if this ROM number is valid reading from validrom[] array (valid = ROMVALID @ invalid = 0)
         add	r4, r1, r3, lsl #12     @ LSL ROMNUM (r3) 14 places (ie 12 more) into MSBs and add to ram[] array address to build romptr
         str	ip, [r7]                @ write out ROMVALID flag to DATACTRL_OUT (data is dont care)
