@@ -224,8 +224,8 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/CWTA.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/MAXAM.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/BEEBUG.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
@@ -255,7 +255,9 @@ void asmloop( int *romvalid, char *romdata ) {
 
 void loop() { 
 #ifdef USE_ASM_LOOP
-  asmloop( (int *) valid_upperrom, (char *) ram);
+  __disable_irq();
+  asmloop( (int *) valid_upperrom, (char *) upperrom);
+  __enable_irq();
 #else
   int ctrladrhi;       
   int address;         
