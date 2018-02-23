@@ -222,19 +222,19 @@
 // Global variables
 const char upperrom[MAXROMS*ROMSIZE] = {
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/MAXAM114.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/CWTA.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/PROTEXT.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/MAXAM15.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/UTOP107.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/BCPL.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
 };
 
 char ram[MAXROMS*ROMSIZE] ;
 
 const int valid_upperrom[MAXROMS] = {
-  0,0,ROMVALID,0,0,0,ROMVALID,0
+  0,0,ROMVALID,0,0,0,0,0
 };
 
 void setup() {
@@ -255,7 +255,7 @@ void asmloop( int *romvalid, char *romdata ) {
 
 void loop() { 
 #ifdef USE_ASM_LOOP
-  asmloop( (int *) valid_upperrom, (char *) ram );
+  asmloop( (int *) valid_upperrom, (char *) ram);
 #else
   int ctrladrhi;       
   int address;         
