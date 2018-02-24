@@ -93,19 +93,14 @@ EXITLOOP:                               @ Loop until RD* and WR* both go inactiv
         ldr	r2, [r9, #0]            @ r2 = [CTRLADRHI_IN] sample control and address bits
         and.w	r5, r2, r10        
         cmp.w	r5, r10            
-        bne     EXITLOOP        
-//ENTRYLOOP:                              
-//        ldr	r2, [r9, #0]            
-//        and.w	r5, r2, r10        
-//        cmp.w	r5, r10            
-//        beq     ENTRYLOOP        
+        bne     EXITLOOP
 L0:     
         ldr	r2, [r9, #0]            @ r2 = [CTRLADRHI_IN] sample control and address bits
         ldr	r3, [r11, #0]           @ r3 = [ADRLO_DINLO_IN] sample datain and address low bits
         and	r5, r2, r6              @ isolate trigger bits IOREQB_ADR13_WRB
         cbz     r5, ROMSEL              @ jump to ROM SELECTION if all low
         and	r5, r2, r8              @ isolate trigger bits ADR14_ROMENB
-        cmp	r5, #ADR14              @ ROM access = ROMENB low and ADR14 high
+        cmp	r5, #ADR14              @ ROM access = ROMENB low and ADR14 high        
         bne     L0                      @ loop again if not equal otherwise fall through to ROM ACCESS
 
 ROMACCESS:      

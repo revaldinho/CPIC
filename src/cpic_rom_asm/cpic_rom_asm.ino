@@ -216,13 +216,12 @@
 #define ROMSIZE           16384
 
 #define ROMSEL            (!(ctrladrhi&(IOREQ_B|ADR_13_RAW|WR_B)))
-//#define HIROMRD           ((ctrladrhi&(ROMEN_B|ADR_14_RAW))==(ADR_14_RAW))
-#define HIROMRD           (!(ctrladrhi&(ROMEN_B)))
+#define HIROMRD           ((ctrladrhi&(ROMEN_B|ADR_14_RAW))==(ADR_14_RAW))
 
 // Global variables
 const char upperrom[MAXROMS*ROMSIZE] = {
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
-#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/ALL_ZEROS.CSV"
+#include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/Manic_Miner.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/Thrust.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/PROTEXT.CSV"
 #include "/Users/richarde/Documents/Development/git/CPiC/src/CSV/MAXAM150.CSV"
@@ -234,7 +233,7 @@ const char upperrom[MAXROMS*ROMSIZE] = {
 char ram[MAXROMS*ROMSIZE] ;
 
 const int valid_upperrom[MAXROMS] = {
-  0,0,ROMVALID,ROMVALID,ROMVALID,ROMVALID,ROMVALID,0
+  0,ROMVALID,ROMVALID,ROMVALID,ROMVALID,ROMVALID,ROMVALID,0
 };
 
 void setup() {
@@ -265,10 +264,9 @@ void loop() {
   char romdata = 0;  
   int romvalid = 0;
   int adrlo_dinlo = 0;  
+  __disable_irq();
   while (true) {
-    //while ( ((ctrladrhi=CTRLADRHI_IN)&(ROMEN_B|IOREQ_B)) == (ROMEN_B|IOREQ_B) ) { }
-    //while ( ((ctrladrhi=CTRLADRHI_IN)&CLK4) ) {}
-    while ( !((ctrladrhi=CTRLADRHI_IN)&CLK4) ) {}
+    while ( ((ctrladrhi=CTRLADRHI_IN)&(RD_B|WR_B)) != (RD_B|WR_B) ) { }
     adrlo_dinlo = ADRLO_DINLO_IN;
     if (HIROMRD) {   
       address =((ctrladrhi>>8)&0x3F00)|(adrlo_dinlo&0x00FF);
@@ -281,6 +279,8 @@ void loop() {
       DATACTRL_OUT  = 0x00 | romvalid ;  
     } 
   }
+  __enable_irq();
+
 #endif
 }
             
