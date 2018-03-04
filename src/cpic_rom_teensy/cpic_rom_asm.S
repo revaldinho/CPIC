@@ -96,15 +96,14 @@ EXITLOOP:                               @ Loop until RD* and WR* both go inactiv
         bne     EXITLOOP
 L0:     
         ldr	r2, [r9, #0]            @ r2 = [CTRLADRHI_IN] sample control and address bits
-        ldr	r3, [r11, #0]           @ r3 = [ADRLO_DINLO_IN] sample datain and address low bits
+        ldrb	r3, [r11, #0]           @ r3 = [ADRLO_DINLO_IN] sample address low bits only, zero extended to 32b                
         and	r5, r2, r6              @ isolate trigger bits IOREQB_ADR13_WRB
         cbz     r5, ROMSEL              @ jump to ROM SELECTION if all low
         and	r5, r2, r8              @ isolate trigger bits ADR14_ROMENB
         cmp	r5, #ADR14              @ ROM access = ROMENB low and ADR14 high        
         bne     L0                      @ loop again if not equal otherwise fall through to ROM ACCESS
-
-ROMACCESS:      
-        and 	r3, r3, #0xFF    	@ mask off low address bits
+        
+ROMACCESS:
         and	r5, r2, #0x3f0000	@ mask off upper 6 high address bits (16K address range) in place [high adr byte orig at bits 23:16]        
         orr	r3, r3, r5, lsr #8      @ OR upper and lower address bytes together shifting upper address bits into correct location         
         ldrb	r3, [r4, r3]            @ get romdata from [romptr+address] - zero extended to 32 bits
@@ -112,6 +111,7 @@ ROMACCESS:
         b       EXITLOOP
 
 ROMSEL:                                 @ ROM SELECTION event
+        ldr	r3, [r11, #0]           @ r3 = [ADRLO_DINLO_IN] resample data in bits together with address low bits again
         lsr	r3, r3, #10     	@ shift databits into bottom byte to be ROMNUM*4 (ie shifted 2 places left) 'cos valid data is ints which are 4 bits
         and	r3, r3, #0x3C     	@ mask off the ROM number with 00 in bottom two bits
         ldr	ip, [r0, r3]    	@ check if this ROM number is valid reading from validrom[] array (valid = ROMVALID @ invalid = 0)
