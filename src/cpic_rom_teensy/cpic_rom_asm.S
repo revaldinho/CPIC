@@ -41,7 +41,7 @@
         @@  Port Address definitions
         .thumb
         .syntax unified
-        .equ    DINLO_IN                0x400ff010 @ PORTA DIN
+        .equ    DINLO_IN,               0x400ff010 @ PORTA DIN
         .equ	CTRLADRHI_IN,           0x400ff050 @ PORTB DIN
         .equ	ADRLO_IN,	        0x400ff0d0 @ PORTD DIN
         .equ	DATACTRL_OUT,           0x400ff080 @ PORTC DOUT
