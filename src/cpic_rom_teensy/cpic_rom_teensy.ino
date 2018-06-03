@@ -14,8 +14,7 @@
    CPIC uses the Teensy to expand an Amstrad CPC providing
    - 16 Upper (Application) ROM slots
    - Lower (Firmware) ROM replacement
-   - 128K Bytes of RAM expansion using a DK'tronics/CPC6128 compatible banking scheme
-
+ 
    All ROM data is stored in flash memory to be persistent, but accessing it does
    incur some wait states on the MIPS CPU whereas the RAM runs at the full 120MHz
    core speed. Copying the ROM contents into RAM is possible to speed this up,
@@ -27,28 +26,6 @@
    ========================
 
    ROM Selection performed by writing the ROM number to an IO address with A13 low.
-   RAM expansion models a 64KBytes DKtronics unit. See
-   o http://www.cpcwiki.eu/imgs/8/83/DK%27Tronics_Peripheral_-_Technical_Manual_%28Edition_1%29.pdf
-
-   RAM is switched in blocks of 16KBytes by writing a byte with the top two bit set to
-   an IO address with A15 low. The remaining 6 bits are then interpreted as follows:
-        0b11 ccc bbb
-        ccc - is the bank code
-        bbb - is the block code
-
-   The block to be accessed can be computed from the following table where ccc is only valid for 000 and 001 values (which select
-   between bank 0 (built-in) and expansion bank 1 or between bank0 and expansion bank 2 respectively. '-1' in the table means
-   that the RAM expansion is not used and the access goes to the internal RAM. The rows in the table are selected according to
-   the upper two address bits of the memory access.
-
-   -------------------------------------------------------------------------------------------------------------------------------:---------
-   Address\cccbbb 000000 000001 000010 000011 000100 000101 000110 000011 001000 001001 001010 001011 001100 001101 001110 001111 : >001111
-   -------------------------------------------------------------------------------------------------------------------------------:---------
-   1100-1111       -1      3      3      3      -1     -1     -1     -1     -1     7       7      7     -1     -1     -1     -1   :     -
-   1000-1011       -1      -1     2      -1     -1     -1     -1     -1     -1     -1      6      -1    -1     -1     -1     -1   :     -
-   0100-0111       -1      -1     1      -1     0      1       2      3     -1     -1      5      -1    4      5      6      7    :     -
-   0000-0011       -1      -1     0      -1     -1     -1     -1     -1     -1     -1      4      -1    -1     -1     -1     -1   :     -
-   -------------------------------------------------------------------------------------------------------------------------------:---------
 
    ROM is accessed whenever ROMEN_B goes low. Addresses with Address[15] set go to upper (foreground)
    ROMs and those with Address[15] low go to lower ROM.

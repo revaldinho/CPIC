@@ -14,4 +14,5 @@ popd
 
 # turn the assembler into an asm() statement
 
-python3 asm2asm.py cpic_rom_teensy/cpic_rom_asm.S | grep -v "%function" > cpic_rom_asmloop.inc 
+python3 asm2asm.py cpic_rom_teensy/cpic_rom_asm.S | grep -v "%function" > cpic_rom_asmloop.inc
+python3 asm2asm.py ../asm/cpic_ulrom_asm.S | grep -v "%function" > cpic_ulrom_asmloop.inc 
